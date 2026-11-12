@@ -1,0 +1,58 @@
+# Secrets / local config (never commit real .env files or credentials)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*.json
+
+# Python caches & virtual environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Local runtime databases / fallback stores
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / frontend dependencies
+node_modules/
+frontend/coverage/
+Local-Version/frontend/coverage/
+
+# Logs / OS / editors
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Packaged archives
+CloudBalance.zip
+*.zip
+
+# Root-level local working copy preservation (tracked inside Local-Version/ instead)
+/.github/
+/01_Documentation_And_Reports/
+/backend/
+/benchmark/
+/frontend/
+/infra/
+/local draft one/
+/traffic/
+/worker/
+/.env.example
+/.pre-commit-config.yaml
+/docker-compose.yml
+/Makefile
+
+

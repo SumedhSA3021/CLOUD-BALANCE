@@ -1,0 +1,4 @@
+scheduler,total_tasks,completed_tasks,cpu_stddev_mean,cpu_stddev_max,peak_cpu_pct,peak_mem_pct,cpu_cap_violations,mem_cap_violations,total_cap_violations,mean_completion_latency_ms,p95_completion_latency_ms,mean_solver_latency_ms,p95_solver_latency_ms,throughput_tasks_per_sec
+ortools_milp,120,120,5.11,15.85,83.26,79.21,0,0,0,385.83,514.2,10.211,17.501,14.56
+least_connections,120,120,10.88,24.29,88.91,71.59,3,0,3,397.08,574.58,0.015,0.025,14.56
+round_robin,120,120,11.04,24.36,88.91,71.59,3,0,3,397.48,574.57,0.009,0.011,14.56

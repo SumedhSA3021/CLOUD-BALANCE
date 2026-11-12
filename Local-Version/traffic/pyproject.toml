@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cb-traffic"
+version = "1.0.0"
+description = "CloudBalance Seedable Multi-Client Poisson Traffic Generator CLI"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+]
+
+[project.scripts]
+cb-traffic = "traffic.cli:main"
+
+[tool.setuptools]
+packages = ["traffic"]
+package-dir = {"traffic" = "."}
+

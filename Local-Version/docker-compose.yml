@@ -1,0 +1,115 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: cb-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-cb-redis-local-pass}", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cb-redis-local-pass}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mongo:
+    image: mongo:7.0
+    container_name: cb-mongo
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  controller:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cb-controller
+    environment:
+      CB_ENV: "production"
+      CB_LOCAL_MODE: "false"
+      CB_SEED_DEMO_WORKERS: "false"
+      CB_API_KEY: "${CB_API_KEY:-cb-dev-api-key-2026}"
+      CB_REQUIRE_API_KEY: "${CB_REQUIRE_API_KEY:-false}"
+      CB_REDIS_URL: "redis://:${REDIS_PASSWORD:-cb-redis-local-pass}@redis:6379/0"
+      CB_MONGO_URL: "mongodb://mongo:27017"
+      CB_MONGO_DB_NAME: "cloudbalance"
+      CB_ALLOWED_ORIGINS: "http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1:5173"
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-1
+    environment:
+      WORKER_ID: "worker-1"
+      WORKER_IP: "worker-1"
+      WORKER_PORT: "8001"
+      WORKER_TOTAL_MEM_MB: "4096"
+      WORKER_BASE_CPU_PCT: "12.0"
+      WORKER_BASE_MEM_MB: "580.0"
+      CONTROLLER_URL: "http://controller:8000"
+      CB_API_KEY: "${CB_API_KEY:-cb-dev-api-key-2026}"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - controller
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-2
+    environment:
+      WORKER_ID: "worker-2"
+      WORKER_IP: "worker-2"
+      WORKER_PORT: "8002"
+      WORKER_TOTAL_MEM_MB: "4096"
+      WORKER_BASE_CPU_PCT: "18.5"
+      WORKER_BASE_MEM_MB: "760.0"
+      CONTROLLER_URL: "http://controller:8000"
+      CB_API_KEY: "${CB_API_KEY:-cb-dev-api-key-2026}"
+    ports:
+      - "8002:8002"
+    depends_on:
+      - controller
+
+  worker-3:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-3
+    environment:
+      WORKER_ID: "worker-3"
+      WORKER_IP: "worker-3"
+      WORKER_PORT: "8003"
+      WORKER_TOTAL_MEM_MB: "8192"
+      WORKER_BASE_CPU_PCT: "9.5"
+      WORKER_BASE_MEM_MB: "960.0"
+      CONTROLLER_URL: "http://controller:8000"
+      CB_API_KEY: "${CB_API_KEY:-cb-dev-api-key-2026}"
+    ports:
+      - "8003:8003"
+    depends_on:
+      - controller
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: cb-frontend
+    ports:
+      - "5173:80"
+      - "80:80"
+    depends_on:
+      - controller
+
