@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Flame, Pause, Play, RefreshCw, Sliders } from "lucide-react";
-import type { SchedulerName, TaskType } from "../lib/types";
+import { Pause, Play, RefreshCw, Sliders } from "lucide-react";
+import type { SchedulerName } from "../lib/types";
 
 interface ControlPanelProps {
   activeScheduler: string;
@@ -8,7 +8,6 @@ interface ControlPanelProps {
   paused: boolean;
   onSelectScheduler: (sched: SchedulerName) => Promise<void>;
   onChangeLambda: (rate: number) => Promise<void>;
-  onInjectSpike: (count: number, taskType: TaskType) => Promise<void>;
   onTogglePause: (paused: boolean) => Promise<void>;
   onReviveAllWorkers: () => Promise<void>;
 }
@@ -37,7 +36,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   paused,
   onSelectScheduler,
   onChangeLambda,
-  onInjectSpike,
   onTogglePause,
   onReviveAllWorkers,
 }) => {
@@ -50,15 +48,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     setBusy(true);
     try {
       await onSelectScheduler(sched);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleSpike = async () => {
-    setBusy(true);
-    try {
-      await onInjectSpike(12, "CPU_INTENSIVE");
     } finally {
       setBusy(false);
     }
@@ -123,16 +112,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void handleSpike()}
-            className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-1.5 transition"
-          >
-            <Flame className="w-4 h-4 text-amber-400" />
-            Inject Burst Spike (+12 CPU)
-          </button>
-
           <button
             type="button"
             disabled={busy}

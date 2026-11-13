@@ -123,7 +123,6 @@ describe("CloudBalance Frontend Components & Pages", () => {
           paused={false}
           onSelectScheduler={async () => {}}
           onChangeLambda={async () => {}}
-          onInjectSpike={async () => {}}
           onTogglePause={async () => {}}
           onReviveAllWorkers={async () => {}}
         />
@@ -134,7 +133,7 @@ describe("CloudBalance Frontend Components & Pages", () => {
     expect(screen.getByTestId("client-card-laptop-alpha")).toBeInTheDocument();
     expect(screen.getByText("tsk-abc123")).toBeInTheDocument();
     expect(screen.getByText("CPU_INTENSIVE")).toBeInTheDocument();
-    expect(screen.getByText(/Inject Burst Spike/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pause Queue/i)).toBeInTheDocument();
   });
 
   it("renders Ops Dashboard (/) and populates worker and client cards from snapshot", async () => {

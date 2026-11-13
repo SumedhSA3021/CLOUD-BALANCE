@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Header } from "../components/Header";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { fetchRecentTasks, submitTask, switchScheduler } from "../lib/api";
+import { fetchRecentTasks, submitTask } from "../lib/api";
 import type { Assignment, TaskType } from "../lib/types";
 
 type ClientMixOption = "cpu" | "mem" | "balanced";
@@ -277,79 +277,6 @@ export const ClientPage: React.FC = () => {
           </div>
 
           <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-5">
-            {/* Active Scheduler Selector */}
-            <div className="space-y-2 border-b border-slate-800/80 pb-4">
-              <div className="flex items-center justify-between text-xs">
-                <label className="font-medium text-slate-300">
-                  Active Cluster Scheduler (Controls Routing Algorithm)
-                </label>
-                <span className="font-mono text-cyan-300 font-semibold text-[11px]">
-                  Current: {snapshot?.active_scheduler ?? "ortools_milp"}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {[
-                  {
-                    id: "round_robin" as const,
-                    label: "Round Robin",
-                    desc: "Strict w1 ➔ w2 ➔ w3 cyclic",
-                  },
-                  {
-                    id: "least_connections" as const,
-                    label: "Least Connections",
-                    desc: "Fewest active tasks first",
-                  },
-                  {
-                    id: "ortools_milp" as const,
-                    label: "OR-Tools MILP",
-                    desc: "Adaptive peak CPU balance",
-                  },
-                ].map((s) => {
-                  const isActive =
-                    (snapshot?.active_scheduler ?? "ortools_milp") === s.id;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await switchScheduler(s.id);
-                          await refreshNow();
-                        } catch (err) {
-                          setLastError(
-                            err instanceof Error
-                              ? err.message
-                              : "Failed to switch scheduler"
-                          );
-                        }
-                      }}
-                      className={`p-2.5 rounded-lg text-left border transition ${
-                        isActive
-                          ? s.id === "round_robin"
-                            ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 ring-1 ring-cyan-400/50 shadow-sm shadow-cyan-500/20"
-                            : s.id === "least_connections"
-                              ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 ring-1 ring-emerald-400/50 shadow-sm shadow-emerald-500/20"
-                              : "bg-purple-500/20 border-purple-400 text-purple-200 ring-1 ring-purple-400/50 shadow-sm shadow-purple-500/20"
-                          : "bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700"
-                      }`}
-                    >
-                      <div className="text-xs font-bold font-mono text-white flex items-center justify-between">
-                        <span>{s.label}</span>
-                        {isActive && (
-                          <span className="text-[10px] text-cyan-300 font-normal">
-                            ● ACTIVE
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">
-                        {s.desc}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <label

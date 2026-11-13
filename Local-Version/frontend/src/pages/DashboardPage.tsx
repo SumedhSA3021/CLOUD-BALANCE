@@ -13,7 +13,7 @@ import {
   switchScheduler,
   updateTrafficControl,
 } from "../lib/api";
-import type { SchedulerName, TaskType } from "../lib/types";
+import type { SchedulerName } from "../lib/types";
 
 export const DashboardPage: React.FC = () => {
   const { snapshot, history, connectionState, isStale, error, refreshNow } =
@@ -37,20 +37,6 @@ export const DashboardPage: React.FC = () => {
       await updateTrafficControl({ lambda_rate: rate });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to update lambda");
-    }
-  };
-
-  const handleInjectSpike = async (count: number, taskType: TaskType) => {
-    try {
-      setActionError(null);
-      await updateTrafficControl({
-        spike_tasks: count,
-        spike_client_id: "ops-burst-injector",
-        spike_task_type: taskType,
-      });
-      await refreshNow();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to inject spike");
     }
   };
 
@@ -118,7 +104,6 @@ export const DashboardPage: React.FC = () => {
           paused={snapshot?.paused ?? false}
           onSelectScheduler={handleSelectScheduler}
           onChangeLambda={handleChangeLambda}
-          onInjectSpike={handleInjectSpike}
           onTogglePause={handleTogglePause}
           onReviveAllWorkers={handleReviveAllWorkers}
         />
