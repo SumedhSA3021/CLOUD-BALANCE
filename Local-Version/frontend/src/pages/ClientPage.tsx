@@ -6,7 +6,6 @@ import {
   Clock,
   Laptop,
   Play,
-  Send,
   Sparkles,
   Square,
 } from "lucide-react";
@@ -61,7 +60,6 @@ export const ClientPage: React.FC = () => {
   const { snapshot, connectionState, isStale, refreshNow } = useWebSocket();
 
   const [clientId, setClientId] = useState<string>("laptop-alpha");
-  const [selectedTaskType, setSelectedTaskType] = useState<TaskType>("CPU_INTENSIVE");
   const [mix, setMix] = useState<ClientMixOption>("cpu");
   const [lambdaRate, setLambdaRate] = useState<number>(3);
   const [streaming, setStreaming] = useState<boolean>(false);
@@ -124,14 +122,14 @@ export const ClientPage: React.FC = () => {
   const sendSingleTask = useCallback(
     async (explicitType?: TaskType, actionLabel?: string) => {
       const cid = sanitizeClientIdLocal(clientIdRef.current);
-      const tType = explicitType ?? selectedTaskType;
+      const tType = explicitType ?? sampleTaskFromMix(mixRef.current);
       try {
         setLastError(null);
         const res = await submitTask(cid, tType);
         const taskId =
           typeof res.task_id === "string" ? res.task_id : undefined;
         setLastActionBanner({
-          label: actionLabel || `Sent ${tType}`,
+          label: actionLabel || `Auto-Dispatched ${tType}`,
           taskType: tType,
           taskId,
           timestamp: new Date().toLocaleTimeString(),
@@ -144,7 +142,7 @@ export const ClientPage: React.FC = () => {
         );
       }
     },
-    [selectedTaskType, scheduleDelayedSync]
+    [scheduleDelayedSync]
   );
 
   useEffect(() => {
@@ -189,7 +187,7 @@ export const ClientPage: React.FC = () => {
         isStale={isStale}
       />
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
         {/* Top Identity & Routing Status Bar */}
         <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -202,13 +200,13 @@ export const ClientPage: React.FC = () => {
                   CloudBalance Client Portal
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Single entry point for client devices. Submit individual tasks or stream Poisson workloads to the Controller.
+                  Single entry point for client devices. Tasks are generated and dispatched automatically and randomly.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
                 <span className="text-slate-400">Client ID:</span>
                 <input
                   type="text"
@@ -257,142 +255,94 @@ export const ClientPage: React.FC = () => {
           )}
         </section>
 
-        {/* Core Controls Card: Send Task & Stream Options */}
+        {/* Workload Stream Generator (Poisson Arrival) Card */}
         <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-6 shadow-lg space-y-6">
-          <div className="border-b border-slate-800 pb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-              Laptop Client Workload Generator (/client)
-            </h2>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-purple-400" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                Workload Stream Generator (/client) — Automated Poisson Stream
+              </h2>
+            </div>
+            <span className="text-xs font-mono text-slate-400">
+              Tasks generated automatically &amp; randomly
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* OPTION 1: SEND TASK */}
-            <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-4">
-              <div className="flex items-center gap-2 text-cyan-300 border-b border-slate-800 pb-2">
-                <Send className="w-4 h-4" />
-                <h3 className="text-xs font-bold uppercase tracking-wider">
-                  Option 1: Send Single Task
-                </h3>
+          <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <label
+                  htmlFor="stream-mix-select"
+                  className="block text-xs font-medium text-slate-300"
+                >
+                  Workload Mix Profile
+                </label>
+                <select
+                  id="stream-mix-select"
+                  value={mix}
+                  onChange={(e) => setMix(e.target.value as ClientMixOption)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                >
+                  <option value="cpu">CPU Heavy (65% CPU, 15% Balanced, 10% RAM, 10% Query)</option>
+                  <option value="mem">RAM Heavy (65% RAM, 15% Balanced, 10% CPU, 10% Query)</option>
+                  <option value="balanced">Balanced Dynamic Mix (Equal spread across all 4 profiles)</option>
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Mix defines the probability distribution; exact resource demands are resolved by the server.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <label
-                  htmlFor="task-type-select"
-                  className="block text-xs font-medium text-slate-300"
-                >
-                  Select Task Type
-                </label>
-                <select
-                  id="task-type-select"
-                  value={selectedTaskType}
-                  onChange={(e) => setSelectedTaskType(e.target.value as TaskType)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
-                >
-                  <option value="CPU_INTENSIVE">
-                    CPU_INTENSIVE (35% CPU · 256 MB RAM)
-                  </option>
-                  <option value="MEMORY_INTENSIVE">
-                    MEMORY_INTENSIVE (15% CPU · 1024 MB RAM)
-                  </option>
-                  <option value="BALANCED_COMPUTE">
-                    BALANCED_COMPUTE (25% CPU · 512 MB RAM)
-                  </option>
-                  <option value="LIGHTWEIGHT_QUERY">
-                    LIGHTWEIGHT_QUERY (10% CPU · 128 MB RAM)
-                  </option>
-                </select>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => void sendSingleTask(selectedTaskType, "Manual Single Task")}
-                  className="w-full px-4 py-2.5 rounded-lg text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 transition shadow-lg shadow-cyan-500/10"
-                >
-                  <Send className="w-4 h-4" />
-                  Send Task
-                </button>
+                <div className="flex items-center justify-between text-xs">
+                  <label
+                    htmlFor="client-lambda-slider"
+                    className="font-medium text-slate-300"
+                  >
+                    Poisson Arrival Rate (&lambda;)
+                  </label>
+                  <span className="font-mono font-bold text-purple-300">
+                    {lambdaRate} tasks/second
+                  </span>
+                </div>
+                <input
+                  id="client-lambda-slider"
+                  type="range"
+                  min={1}
+                  max={15}
+                  step={1}
+                  value={lambdaRate}
+                  onChange={(e) => setLambdaRate(Number(e.target.value))}
+                  className="w-full accent-purple-400 cursor-pointer mt-1"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Inter-arrival delay modeled via exponential distribution: <code>dt = -ln(1 - U) / &lambda;</code>
+                </p>
               </div>
             </div>
 
-            {/* OPTION 2: STREAM OPTIONS */}
-            <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-4">
-              <div className="flex items-center gap-2 text-purple-300 border-b border-slate-800 pb-2">
-                <Activity className="w-4 h-4" />
-                <h3 className="text-xs font-bold uppercase tracking-wider">
-                  Option 2: Stream Options (Poisson Arrival)
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="stream-mix-select"
-                    className="block text-xs font-medium text-slate-300"
-                  >
-                    Stream Mix Profile
-                  </label>
-                  <select
-                    id="stream-mix-select"
-                    value={mix}
-                    onChange={(e) => setMix(e.target.value as ClientMixOption)}
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  >
-                    <option value="cpu">CPU Heavy (65%)</option>
-                    <option value="mem">RAM Heavy (65%)</option>
-                    <option value="balanced">Balanced (Mix)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <label
-                      htmlFor="client-lambda-slider"
-                      className="font-medium text-slate-300"
-                    >
-                      Rate (&lambda;)
-                    </label>
-                    <span className="font-mono font-bold text-purple-300">
-                      {lambdaRate} req/s
-                    </span>
-                  </div>
-                  <input
-                    id="client-lambda-slider"
-                    type="range"
-                    min={1}
-                    max={15}
-                    step={1}
-                    value={lambdaRate}
-                    onChange={(e) => setLambdaRate(Number(e.target.value))}
-                    className="w-full accent-purple-400 cursor-pointer mt-1"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStreaming((s) => !s)}
-                  className={`w-full py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-lg ${
-                    streaming
-                      ? "bg-rose-500 hover:bg-rose-400 text-slate-950 shadow-rose-500/20"
-                      : "bg-purple-500 hover:bg-purple-400 text-slate-950 shadow-purple-500/20"
-                  }`}
-                >
-                  {streaming ? (
-                    <>
-                      <Square className="w-4 h-4 fill-current" />
-                      Stop Stream
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 fill-current" />
-                      Start Stream
-                    </>
-                  )}
-                </button>
-              </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setStreaming((s) => !s)}
+                className={`w-full py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition shadow-lg ${
+                  streaming
+                    ? "bg-rose-500 hover:bg-rose-400 text-slate-950 shadow-rose-500/20"
+                    : "bg-purple-500 hover:bg-purple-400 text-slate-950 shadow-purple-500/20"
+                }`}
+              >
+                {streaming ? (
+                  <>
+                    <Square className="w-4 h-4 fill-current" />
+                    Stop Stream
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-current" />
+                    Start Stream
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </section>
@@ -420,7 +370,7 @@ export const ClientPage: React.FC = () => {
             <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-lg">
               No requests recorded for{" "}
               <code className="text-cyan-300">{normalizedClientId}</code> yet.
-              Click <strong className="text-white">Send Task</strong> or <strong className="text-white">Start Stream</strong> above.
+              Click <strong className="text-purple-400">Start Stream</strong> above to begin generating automatic workloads.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -428,7 +378,7 @@ export const ClientPage: React.FC = () => {
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 uppercase text-[11px]">
                     <th className="py-2 px-3">Task ID</th>
-                    <th className="py-2 px-3">Task Type</th>
+                    <th className="py-2 px-3">Resolved Task Type</th>
                     <th className="py-2 px-3">Server Profile</th>
                     <th className="py-2 px-3">Assigned Worker</th>
                     <th className="py-2 px-3">Scheduler</th>

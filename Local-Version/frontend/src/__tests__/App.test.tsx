@@ -152,7 +152,7 @@ describe("CloudBalance Frontend Components & Pages", () => {
     expect(screen.getByTestId("client-card-laptop-alpha")).toBeInTheDocument();
   });
 
-  it("renders Laptop Client (/client) page with controls and send task button", async () => {
+  it("renders Laptop Client (/client) page with stream workload controls", async () => {
     render(
       <MemoryRouter
         initialEntries={["/client"]}
@@ -163,14 +163,14 @@ describe("CloudBalance Frontend Components & Pages", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText(/Laptop Client Workload Generator/i)
+        screen.getByText(/Workload Stream Generator/i)
       ).toBeInTheDocument();
     });
     expect(
-      screen.getByRole("button", { name: /Send Task/i })
+      screen.getByRole("button", { name: /Start Stream/i })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Start Stream/i })
+      screen.getByLabelText(/Workload Mix Profile/i)
     ).toBeInTheDocument();
   });
 });
