@@ -138,6 +138,79 @@ export const DashboardPage: React.FC = () => {
                 </span>
               </div>
 
+              {/* Dynamic Scheduler Rotation Indicator */}
+              {activeScheduler === "round_robin" && (
+                <div
+                  data-testid="rr-rotation-flow"
+                  className="mb-3.5 p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/40 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs font-mono"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-400" />
+                      </span>
+                      Round Robin Rotation Flow:
+                    </span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      {["worker-1", "worker-2", "worker-3"].map((wid, idx) => {
+                        const isCurrentTarget =
+                          latestAssignment?.assigned_worker_id === wid;
+                        return (
+                          <React.Fragment key={wid}>
+                            <span
+                              className={`px-2.5 py-1 rounded font-bold transition duration-200 ${
+                                isCurrentTarget
+                                  ? "bg-cyan-500 text-slate-950 ring-2 ring-cyan-300 shadow-md shadow-cyan-500/40 scale-105"
+                                  : "bg-slate-900 border border-slate-700 text-slate-400"
+                              }`}
+                            >
+                              {wid}
+                            </span>
+                            {idx < 2 && (
+                              <span className="text-cyan-400 font-bold">➔</span>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                      <span className="text-cyan-400 font-bold ml-1">➔ (repeats w1)</span>
+                    </div>
+                  </div>
+                  <span className="text-cyan-200 text-[11px]">
+                    Current Target:{" "}
+                    <strong className="text-white underline font-bold">
+                      {latestAssignment?.assigned_worker_id ?? "worker-1"}
+                    </strong>
+                  </span>
+                </div>
+              )}
+
+              {activeScheduler === "least_connections" && (
+                <div
+                  data-testid="lc-priority-flow"
+                  className="mb-3.5 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs font-mono"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                      </span>
+                      Least Connections Routing:
+                    </span>
+                    <span className="text-slate-300">
+                      Dispatches to worker with fewest active tasks (Tie-break: w1 ➔ w2 ➔ w3)
+                    </span>
+                  </div>
+                  <span className="text-emerald-200 text-[11px]">
+                    Selected Node:{" "}
+                    <strong className="text-white underline font-bold">
+                      {latestAssignment?.assigned_worker_id ?? "worker-1"}
+                    </strong>
+                  </span>
+                </div>
+              )}
+
               {workers.length === 0 ? (
                 <div className="rounded-xl bg-slate-900/90 border border-dashed border-slate-800 p-8 text-center text-xs text-slate-400">
                   No active worker VMs reporting in Redis (`cluster:worker:*`). Click{" "}

@@ -43,13 +43,15 @@ class LeastConnectionsScheduler(BaseScheduler):
                 ),
             )
 
-        num_workers = len(workers)
+        # Strictly sort workers by worker_id for deterministic tie-breaking (w1 -> w2 -> w3)
+        sorted_workers = sorted(workers, key=lambda w: w.worker_id)
+        num_workers = len(sorted_workers)
         proj_cpus: list[float] = []
         proj_mems: list[float] = []
         total_mems: list[float] = []
         active_counts: list[int] = []
 
-        for w in workers:
+        for w in sorted_workers:
             if_cpu, if_mem, if_count = self.in_flight.get_worker_in_flight(w.worker_id, now_mono)
             proj_cpus.append(float(w.cpu_percent) + if_cpu)
             proj_mems.append(float(w.memory_used_mb) + if_mem)
@@ -60,7 +62,7 @@ class LeastConnectionsScheduler(BaseScheduler):
         for task in batch:
             # Pick worker with minimum active connection count
             best_j = min(range(num_workers), key=lambda j: (active_counts[j], j))
-            chosen_worker = workers[best_j]
+            chosen_worker = sorted_workers[best_j]
             assignments[task.task_id] = chosen_worker.worker_id
             active_counts[best_j] += 1
             proj_cpus[best_j] += task.cpu_demand_pct

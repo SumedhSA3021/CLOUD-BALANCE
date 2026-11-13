@@ -362,10 +362,11 @@ export const ClientPage: React.FC = () => {
                 Live Requests Sent by{" "}
                 <span className="font-mono text-cyan-300">
                   {normalizedClientId}
-                </span>
+                </span>{" "}
+                <span className="text-slate-400 font-normal text-xs">(Newest at top ↓ Oldest)</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Real-time visibility into which internal Worker VM served each request
+                Real-time chronological log of which internal Worker VM served each request
               </p>
             </div>
             <span className="text-xs font-mono text-slate-400">
@@ -384,8 +385,9 @@ export const ClientPage: React.FC = () => {
               <table className="w-full text-left border-collapse text-xs font-mono">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 uppercase text-[11px]">
+                    <th className="py-2 px-3">Time</th>
                     <th className="py-2 px-3">Task ID</th>
-                    <th className="py-2 px-3">Resolved Task Type</th>
+                    <th className="py-2 px-3">Resolved Type</th>
                     <th className="py-2 px-3">Server Profile</th>
                     <th className="py-2 px-3">Assigned Worker</th>
                     <th className="py-2 px-3">Scheduler</th>
@@ -394,54 +396,64 @@ export const ClientPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
-                  {ownTasks.map((t, idx) => (
-                    <tr
-                      key={t.task_id}
-                      className={`transition ${
-                        idx === 0
-                          ? "bg-cyan-500/10 hover:bg-cyan-500/15"
-                          : "hover:bg-slate-800/40"
-                      }`}
-                    >
-                      <td className="py-2 px-3 text-slate-300">{t.task_id}</td>
-                      <td className="py-2 px-3 text-white font-semibold">
-                        {t.task_type}
-                      </td>
-                      <td className="py-2 px-3 text-slate-400">
-                        {t.cpu_demand_pct}% CPU / {t.mem_demand_mb} MB
-                      </td>
-                      <td className="py-2 px-3 text-cyan-300 font-semibold">
-                        <span className="inline-flex items-center gap-1">
-                          <ArrowRight className="w-3 h-3" />
-                          {t.assigned_worker_id}
-                          {idx === 0 && (
-                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 animate-pulse">
-                              LATEST TARGET
+                  {ownTasks.map((t, idx) => {
+                    const timeStr = new Date(t.timestamp).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    });
+                    return (
+                      <tr
+                        key={t.task_id}
+                        className={`transition ${
+                          idx === 0
+                            ? "bg-cyan-500/10 hover:bg-cyan-500/15"
+                            : "hover:bg-slate-800/40"
+                        }`}
+                      >
+                        <td className="py-2 px-3 text-slate-400 text-[11px] whitespace-nowrap">
+                          {timeStr}
+                        </td>
+                        <td className="py-2 px-3 text-slate-300">{t.task_id}</td>
+                        <td className="py-2 px-3 text-white font-semibold">
+                          {t.task_type}
+                        </td>
+                        <td className="py-2 px-3 text-slate-400">
+                          {t.cpu_demand_pct}% CPU / {t.mem_demand_mb} MB
+                        </td>
+                        <td className="py-2 px-3 text-cyan-300 font-semibold">
+                          <span className="inline-flex items-center gap-1">
+                            <ArrowRight className="w-3 h-3" />
+                            {t.assigned_worker_id}
+                            {idx === 0 && (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 animate-pulse">
+                                LATEST TARGET
+                              </span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-slate-300">{t.scheduler}</td>
+                        <td className="py-2 px-3 text-slate-300">
+                          {t.execution_ms
+                            ? `${t.execution_ms.toFixed(0)} ms`
+                            : "..."}
+                        </td>
+                        <td className="py-2 px-3">
+                          {t.status === "COMPLETED" ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-400">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              COMPLETED
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-cyan-300">
+                              <Clock className="w-3.5 h-3.5" />
+                              {t.status}
                             </span>
                           )}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-300">{t.scheduler}</td>
-                      <td className="py-2 px-3 text-slate-300">
-                        {t.execution_ms
-                          ? `${t.execution_ms.toFixed(0)} ms`
-                          : "..."}
-                      </td>
-                      <td className="py-2 px-3">
-                        {t.status === "COMPLETED" ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-400">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            COMPLETED
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-cyan-300">
-                            <Clock className="w-3.5 h-3.5" />
-                            {t.status}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

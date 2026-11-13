@@ -19,13 +19,17 @@ class RoundRobinScheduler(BaseScheduler):
         )
         self._cursor: int = 0
 
+    def reset(self) -> None:
+        """Reset cyclic pointer back to 0 so next task starts at worker-1."""
+        self._cursor = 0
+
     def assign(
         self,
         batch: Sequence[Task],
         workers: Sequence[Telemetry],
         record_in_flight: bool = True,
     ) -> BatchAssignmentResult:
-        """Assign tasks cyclically regardless of worker CPU/RAM utilization."""
+        """Assign tasks cyclically (w1 -> w2 -> w3 -> w1) regardless of worker CPU/RAM utilization."""
         start_ns = time.perf_counter_ns()
         now_mono = time.monotonic()
 
@@ -44,12 +48,14 @@ class RoundRobinScheduler(BaseScheduler):
                 ),
             )
 
-        num_workers = len(workers)
+        # Strictly sort workers by worker_id to guarantee w1 -> w2 -> w3 cyclic rotation
+        sorted_workers = sorted(workers, key=lambda w: w.worker_id)
+        num_workers = len(sorted_workers)
         proj_cpus: list[float] = []
         proj_mems: list[float] = []
         total_mems: list[float] = []
 
-        for w in workers:
+        for w in sorted_workers:
             if_cpu, if_mem, _ = self.in_flight.get_worker_in_flight(w.worker_id, now_mono)
             proj_cpus.append(float(w.cpu_percent) + if_cpu)
             proj_mems.append(float(w.memory_used_mb) + if_mem)
@@ -59,7 +65,7 @@ class RoundRobinScheduler(BaseScheduler):
         for task in batch:
             idx = self._cursor % num_workers
             self._cursor = (self._cursor + 1) % (num_workers * 1_000_000)
-            chosen_worker = workers[idx]
+            chosen_worker = sorted_workers[idx]
             assignments[task.task_id] = chosen_worker.worker_id
             proj_cpus[idx] += task.cpu_demand_pct
             proj_mems[idx] += task.mem_demand_mb

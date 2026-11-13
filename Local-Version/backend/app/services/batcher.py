@@ -107,6 +107,10 @@ class MicroBatcherService:
         """Hot-swap the active scheduler at runtime."""
         resolved = str(SchedulerName(scheduler_name).value)
         self._active_scheduler_name = resolved
+        if resolved == SchedulerName.ROUND_ROBIN.value:
+            rr_sched = self._schedulers.get(resolved)
+            if hasattr(rr_sched, "reset"):
+                rr_sched.reset()
         logger.info("scheduler_hot_swapped", active_scheduler=resolved)
         return resolved
 
