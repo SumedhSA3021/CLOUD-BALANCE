@@ -130,11 +130,17 @@ def main() -> int:
 
         # Monitor child processes until interrupted
         while True:
+            for idx, p in enumerate(processes[:-1], start=1):
+                if p.poll() is not None:
+                    print(f"[!] Worker-{idx} process exited unexpectedly with returncode: {p.poll()}", flush=True)
             if ctrl_proc.poll() is not None:
+                print(f"[!] Controller process exited with returncode: {ctrl_proc.poll()}", flush=True)
                 return ctrl_proc.returncode or 0
             time.sleep(0.5)
     except KeyboardInterrupt:
-        print("\n[*] Stopping CloudBalance Cluster...")
+        print("\n[*] Stopping CloudBalance Cluster via KeyboardInterrupt...", flush=True)
+    except Exception as exc:
+        print(f"\n[!] Unexpected error in cluster loop: {exc}", flush=True)
     finally:
         for p in processes:
             if p.poll() is None:
