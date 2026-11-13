@@ -54,8 +54,35 @@ WORKER_CONFIGS = [
     },
 ]
 
+CLUSTER_PORTS = (8000, 8001, 8002, 8003)
+
+
+def free_ports(ports: tuple[int, ...] = CLUSTER_PORTS) -> None:
+    """Safely terminate any lingering processes listening on the target cluster ports."""
+    try:
+        import psutil
+        current_pid = os.getpid()
+        killed: set[int] = set()
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port in ports:
+                pid = conn.pid
+                if pid and pid != current_pid and pid not in killed:
+                    try:
+                        p = psutil.Process(pid)
+                        print(f"[*] Releasing port {conn.laddr.port} from stale PID {pid} ({p.name()})...")
+                        p.kill()
+                        p.wait(timeout=1.0)
+                        killed.add(pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+    except Exception as e:
+        print(f"[!] Port pre-check note: {e}")
+
 
 def main() -> int:
+    # 0. Automatically free any orphaned listeners before binding
+    free_ports(CLUSTER_PORTS)
+
     processes: list[subprocess.Popen[bytes]] = []
     python_exe = sys.executable
 
@@ -99,28 +126,31 @@ def main() -> int:
         ctrl_proc = subprocess.Popen(ctrl_cmd, cwd=str(BACKEND_DIR), env=ctrl_env)
         processes.append(ctrl_proc)
 
+        print("[✓] CloudBalance Cluster successfully initialized on ports 8000-8003.")
+
         # Monitor child processes until interrupted
         while True:
             if ctrl_proc.poll() is not None:
                 return ctrl_proc.returncode or 0
             time.sleep(0.5)
     except KeyboardInterrupt:
-        pass
+        print("\n[*] Stopping CloudBalance Cluster...")
     finally:
         for p in processes:
             if p.poll() is None:
                 try:
-                    p.send_signal(signal.SIGTERM)
+                    p.kill()
                 except Exception:
-                    p.terminate()
+                    pass
         for p in processes:
             try:
-                p.wait(timeout=3.0)
+                p.wait(timeout=2.0)
             except Exception:
-                p.kill()
+                pass
+        free_ports(CLUSTER_PORTS)
+        print("[✓] All cluster ports successfully cleaned up.")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

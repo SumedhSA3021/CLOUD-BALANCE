@@ -136,7 +136,7 @@ describe("CloudBalance Frontend Components & Pages", () => {
     expect(screen.getByText(/Pause Queue/i)).toBeInTheDocument();
   });
 
-  it("renders Ops Dashboard (/) and populates worker and client cards from snapshot", async () => {
+  it("renders Ops Dashboard (/) and populates worker cards from snapshot without client cards", async () => {
     render(
       <MemoryRouter
         initialEntries={["/"]}
@@ -148,7 +148,7 @@ describe("CloudBalance Frontend Components & Pages", () => {
     await waitFor(() => {
       expect(screen.getByTestId("worker-card-worker-1")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("client-card-laptop-alpha")).toBeInTheDocument();
+    expect(screen.queryByTestId("client-card-laptop-alpha")).not.toBeInTheDocument();
   });
 
   it("renders Laptop Client (/client) page with stream workload controls", async () => {

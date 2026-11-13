@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { AssignmentFeed } from "../components/AssignmentFeed";
 import { BenchmarkSection } from "../components/BenchmarkSection";
-import { ClientPanel } from "../components/ClientPanel";
 import { ControlPanel } from "../components/ControlPanel";
 import { Header } from "../components/Header";
 import { MetricsChart } from "../components/MetricsChart";
@@ -74,7 +73,6 @@ export const DashboardPage: React.FC = () => {
 
   const workers = snapshot?.workers ?? [];
   const assignments = snapshot?.recent_assignments ?? [];
-  const clients = snapshot?.clients ?? [];
   const latestAssignment = assignments.length > 0 ? assignments[0] : null;
   const activeScheduler = snapshot?.active_scheduler ?? "ortools_milp";
 
@@ -228,9 +226,6 @@ export const DashboardPage: React.FC = () => {
 
             {/* Rolling 60-Point Telemetry Chart */}
             <MetricsChart history={history} workers={workers} />
-
-            {/* Per-Client Panel */}
-            <ClientPanel clients={clients} />
 
             {/* Live Assignment Feed */}
             <AssignmentFeed assignments={assignments} />

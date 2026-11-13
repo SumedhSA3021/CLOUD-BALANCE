@@ -150,4 +150,3 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     </section>
   );
 };
-

@@ -32,7 +32,7 @@ export const AssignmentFeed: React.FC<AssignmentFeedProps> = ({ assignments }) =
 
       {assignments.length === 0 ? (
         <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-lg">
-          No tasks dispatched yet. Start a stream from <code className="text-cyan-300">/client</code>.
+          No tasks dispatched yet. Start a stream from <code className="text-cyan-300">/client</code> or inject a burst spike above.
         </div>
       ) : (
         <div className="overflow-x-auto max-h-80">
