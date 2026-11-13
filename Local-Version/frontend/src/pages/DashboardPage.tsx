@@ -89,6 +89,8 @@ export const DashboardPage: React.FC = () => {
   const workers = snapshot?.workers ?? [];
   const assignments = snapshot?.recent_assignments ?? [];
   const clients = snapshot?.clients ?? [];
+  const latestAssignment = assignments.length > 0 ? assignments[0] : null;
+  const activeScheduler = snapshot?.active_scheduler ?? "ortools_milp";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -143,13 +145,25 @@ export const DashboardPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {workers.map((worker) => (
-                    <WorkerCard
-                      key={worker.worker_id}
-                      worker={worker}
-                      onKillWorker={(wid) => void handleKillWorker(wid)}
-                    />
-                  ))}
+                  {workers.map((worker) => {
+                    const isLatest =
+                      latestAssignment?.assigned_worker_id === worker.worker_id;
+                    return (
+                      <WorkerCard
+                        key={worker.worker_id}
+                        worker={worker}
+                        onKillWorker={(wid) => void handleKillWorker(wid)}
+                        isLatestTarget={isLatest}
+                        activeScheduler={activeScheduler}
+                        latestTaskId={
+                          isLatest ? latestAssignment?.task_id : undefined
+                        }
+                        latestTaskType={
+                          isLatest ? latestAssignment?.task_type : undefined
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
             </section>

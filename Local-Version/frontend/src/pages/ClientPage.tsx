@@ -234,7 +234,7 @@ export const ClientPage: React.FC = () => {
 
           {lastActionBanner && (
             <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
                 <span className="text-slate-200">
                   {lastActionBanner.label}
@@ -245,6 +245,13 @@ export const ClientPage: React.FC = () => {
                 {lastActionBanner.taskId && (
                   <span className="font-mono text-slate-400">
                     ({lastActionBanner.taskId})
+                  </span>
+                )}
+                {ownTasks.length > 0 && (
+                  <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/40 font-mono text-cyan-200 font-semibold flex items-center gap-1">
+                    <ArrowRight className="w-3 h-3 text-cyan-400" />
+                    Routed to: {ownTasks[0].assigned_worker_id} (
+                    {ownTasks[0].scheduler})
                   </span>
                 )}
               </div>
@@ -387,8 +394,15 @@ export const ClientPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
-                  {ownTasks.map((t) => (
-                    <tr key={t.task_id} className="hover:bg-slate-800/40">
+                  {ownTasks.map((t, idx) => (
+                    <tr
+                      key={t.task_id}
+                      className={`transition ${
+                        idx === 0
+                          ? "bg-cyan-500/10 hover:bg-cyan-500/15"
+                          : "hover:bg-slate-800/40"
+                      }`}
+                    >
                       <td className="py-2 px-3 text-slate-300">{t.task_id}</td>
                       <td className="py-2 px-3 text-white font-semibold">
                         {t.task_type}
@@ -400,6 +414,11 @@ export const ClientPage: React.FC = () => {
                         <span className="inline-flex items-center gap-1">
                           <ArrowRight className="w-3 h-3" />
                           {t.assigned_worker_id}
+                          {idx === 0 && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 animate-pulse">
+                              LATEST TARGET
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="py-2 px-3 text-slate-300">{t.scheduler}</td>

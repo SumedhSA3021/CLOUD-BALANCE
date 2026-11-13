@@ -50,8 +50,15 @@ export const AssignmentFeed: React.FC<AssignmentFeedProps> = ({ assignments }) =
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
-              {assignments.slice(0, 20).map((item) => (
-                <tr key={item.task_id} className="hover:bg-slate-800/40 transition">
+              {assignments.slice(0, 20).map((item, idx) => (
+                <tr
+                  key={item.task_id}
+                  className={`transition ${
+                    idx === 0
+                      ? "bg-cyan-500/10 hover:bg-cyan-500/15"
+                      : "hover:bg-slate-800/40"
+                  }`}
+                >
                   <td className="py-2 px-2.5 text-slate-300">{item.task_id}</td>
                   <td className="py-2 px-2.5 font-semibold text-white">
                     {item.client_id}
@@ -72,6 +79,11 @@ export const AssignmentFeed: React.FC<AssignmentFeedProps> = ({ assignments }) =
                     <span className="inline-flex items-center gap-1 text-cyan-300 font-semibold">
                       <ArrowRight className="w-3 h-3" />
                       {item.assigned_worker_id}
+                      {idx === 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 animate-pulse">
+                          LATEST
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="py-2 px-2.5 text-slate-300">{item.scheduler}</td>

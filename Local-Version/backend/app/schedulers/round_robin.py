@@ -58,7 +58,7 @@ class RoundRobinScheduler(BaseScheduler):
         assignments: dict[str, str] = {}
         for task in batch:
             idx = self._cursor % num_workers
-            self._cursor += 1
+            self._cursor = (self._cursor + 1) % (num_workers * 1_000_000)
             chosen_worker = workers[idx]
             assignments[task.task_id] = chosen_worker.worker_id
             proj_cpus[idx] += task.cpu_demand_pct

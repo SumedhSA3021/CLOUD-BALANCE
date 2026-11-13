@@ -5,6 +5,10 @@ import type { WorkerSnapshotItem, WorkerStatus } from "../lib/types";
 interface WorkerCardProps {
   worker: WorkerSnapshotItem;
   onKillWorker?: (workerId: string) => void;
+  isLatestTarget?: boolean;
+  activeScheduler?: string;
+  latestTaskId?: string;
+  latestTaskType?: string;
 }
 
 const STATUS_BADGE: Record<WorkerStatus, string> = {
@@ -19,7 +23,14 @@ const BAR_COLOR: Record<WorkerStatus, string> = {
   CRITICAL: "bg-rose-500",
 };
 
-export const WorkerCard: React.FC<WorkerCardProps> = ({ worker, onKillWorker }) => {
+export const WorkerCard: React.FC<WorkerCardProps> = ({
+  worker,
+  onKillWorker,
+  isLatestTarget = false,
+  activeScheduler = "ortools_milp",
+  latestTaskId,
+  latestTaskType,
+}) => {
   const cpuStatus: WorkerStatus =
     worker.cpu_percent >= 85
       ? "CRITICAL"
@@ -34,11 +45,81 @@ export const WorkerCard: React.FC<WorkerCardProps> = ({ worker, onKillWorker }) 
         ? "MODERATE"
         : "HEALTHY";
 
+  // Dynamic styling when this worker is the latest to receive load
+  const isRoundRobin = activeScheduler === "round_robin";
+  const isLeastConn = activeScheduler === "least_connections";
+
+  let containerHighlightClass =
+    "border-slate-800 bg-slate-900/90 hover:border-slate-700";
+  if (isLatestTarget) {
+    if (isRoundRobin) {
+      containerHighlightClass =
+        "border-cyan-400 ring-2 ring-cyan-400/80 shadow-[0_0_25px_rgba(34,211,238,0.25)] bg-gradient-to-b from-cyan-950/30 via-slate-900/95 to-slate-900/95";
+    } else if (isLeastConn) {
+      containerHighlightClass =
+        "border-emerald-400 ring-2 ring-emerald-400/80 shadow-[0_0_25px_rgba(16,185,129,0.25)] bg-gradient-to-b from-emerald-950/30 via-slate-900/95 to-slate-900/95";
+    } else {
+      containerHighlightClass =
+        "border-purple-400 ring-2 ring-purple-400/80 shadow-[0_0_25px_rgba(168,85,247,0.25)] bg-gradient-to-b from-purple-950/30 via-slate-900/95 to-slate-900/95";
+    }
+  }
+
   return (
     <div
       data-testid={`worker-card-${worker.worker_id}`}
-      className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 shadow-lg flex flex-col justify-between gap-4 hover:border-slate-700 transition"
+      className={`rounded-xl border p-4 shadow-lg flex flex-col justify-between gap-4 transition duration-200 ${containerHighlightClass}`}
     >
+      {/* Top Banner when Worker Just Received Load */}
+      {isLatestTarget && (
+        <div
+          data-testid={`worker-assigned-banner-${worker.worker_id}`}
+          className={`flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-mono border ${
+            isRoundRobin
+              ? "bg-cyan-500/20 border-cyan-400/50 text-cyan-300"
+              : isLeastConn
+                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300"
+                : "bg-purple-500/20 border-purple-400/50 text-purple-300"
+          }`}
+        >
+          <div className="flex items-center gap-1.5 font-bold">
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isRoundRobin
+                    ? "bg-cyan-400"
+                    : isLeastConn
+                      ? "bg-emerald-400"
+                      : "bg-purple-400"
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isRoundRobin
+                    ? "bg-cyan-400"
+                    : isLeastConn
+                      ? "bg-emerald-400"
+                      : "bg-purple-400"
+                }`}
+              />
+            </span>
+            <span>
+              {isRoundRobin
+                ? "LOAD RECEIVED (Round Robin)"
+                : isLeastConn
+                  ? "LOAD RECEIVED (Least Connections)"
+                  : "LOAD RECEIVED (MILP Minimax)"}
+            </span>
+          </div>
+          <span className="text-[10px] uppercase tracking-wide opacity-90">
+            {isRoundRobin
+              ? "Cyclic Pointer Turn"
+              : isLeastConn
+                ? `Min Active (${worker.active_tasks} Tasks)`
+                : "Optimal Placement"}
+          </span>
+        </div>
+      )}
+
       {/* Top Row: ID + Status Pill */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
@@ -131,21 +212,31 @@ export const WorkerCard: React.FC<WorkerCardProps> = ({ worker, onKillWorker }) 
       </div>
 
       {/* Bottom Stats Footer */}
-      <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-mono">
-        <div>
-          Active Tasks:{" "}
-          <span className="text-cyan-300 font-semibold">{worker.active_tasks}</span>
+      <div className="pt-2 border-t border-slate-800/80 space-y-1.5 font-mono text-xs">
+        <div className="flex items-center justify-between text-slate-400">
+          <div>
+            Active Tasks:{" "}
+            <span className="text-cyan-300 font-semibold">{worker.active_tasks}</span>
+          </div>
+          <div>
+            Load 1m:{" "}
+            <span className="text-slate-200">{worker.load_avg_1m.toFixed(2)}</span>
+          </div>
+          <div>
+            In-Flight:{" "}
+            <span className="text-amber-300">
+              +{worker.in_flight_cpu_pct.toFixed(0)}% CPU
+            </span>
+          </div>
         </div>
-        <div>
-          Load 1m:{" "}
-          <span className="text-slate-200">{worker.load_avg_1m.toFixed(2)}</span>
-        </div>
-        <div>
-          In-Flight:{" "}
-          <span className="text-amber-300">
-            +{worker.in_flight_cpu_pct.toFixed(0)}% CPU
-          </span>
-        </div>
+        {isLatestTarget && latestTaskId && (
+          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/40 text-slate-400">
+            <span className="text-slate-500">Most Recent Load:</span>
+            <span className="text-cyan-300 font-semibold">
+              {latestTaskId} {latestTaskType ? `(${latestTaskType})` : ""}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
