@@ -143,6 +143,12 @@ def create_app(
     application.include_router(benchmark.router)
     application.include_router(websocket.router)
 
+    @application.get("/api/v1/mongo", tags=["persistence"])
+    async def get_mongo_data(request: Request) -> dict[str, Any]:
+        """Convenience direct endpoint for inspecting MongoDB collections."""
+        from app.api.telemetry import inspect_mongo_state
+        return await inspect_mongo_state(request)
+
     # Serve compiled React SPA (/ and /client) directly from Controller (:8000)
     # so 3+ client laptops only need ONE single public URL (http://<CONTROLLER_IP>:8000).
     assets_dir = FRONTEND_DIST_DIR / "assets"

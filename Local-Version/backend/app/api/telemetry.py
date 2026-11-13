@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from app.core.logging import get_logger
+from app.core.mongo_client import DualMongoClient
 from app.core.redis_client import DualRedisClient
 from app.core.security import verify_api_key
 from app.models.schemas import Telemetry, WorkerSnapshotItem
@@ -23,6 +24,10 @@ def _get_cluster_state(request: Request) -> ClusterStateService:
 
 def _get_redis(request: Request) -> DualRedisClient:
     return request.app.state.redis_client  # type: ignore[no-any-return]
+
+
+def _get_mongo(request: Request) -> DualMongoClient:
+    return request.app.state.mongo_client  # type: ignore[no-any-return]
 
 
 @router.post("")
@@ -75,5 +80,23 @@ async def inspect_redis_state(request: Request) -> dict[str, Any]:
         "redis_backend_mode": redis_client.backend_mode,
         "total_keys": len(entries),
         "keys": entries,
+    }
+
+
+@router.get("/mongo")
+async def inspect_mongo_state(request: Request) -> dict[str, Any]:
+    """Inspect all persisted data in MongoDB (`assignments`, `benchmark_runs`)."""
+    mongo_client = _get_mongo(request)
+    assignments = await mongo_client.find_recent_assignments(limit=200)
+    benchmarks = await mongo_client.find_benchmark_runs(limit=20)
+    return {
+        "mongo_backend_mode": mongo_client.backend_mode,
+        "database": getattr(mongo_client, "_db_name", "cloudbalance"),
+        "total_assignments_stored": len(assignments),
+        "total_benchmarks_stored": len(benchmarks),
+        "collections": {
+            "assignments": assignments,
+            "benchmark_runs": benchmarks,
+        },
     }
 
