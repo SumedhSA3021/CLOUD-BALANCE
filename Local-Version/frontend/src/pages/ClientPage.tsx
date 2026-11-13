@@ -2,15 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowRight,
-  BarChart3,
   CheckCircle2,
   Clock,
-  Cpu,
-  Database,
   Laptop,
   Play,
-  Search,
-  Server,
+  Send,
   Sparkles,
   Square,
   Zap,
@@ -74,6 +70,7 @@ export const ClientPage: React.FC = () => {
   const { snapshot, connectionState, isStale, refreshNow } = useWebSocket();
 
   const [clientId, setClientId] = useState<string>("laptop-alpha");
+  const [selectedTaskType, setSelectedTaskType] = useState<TaskType>("CPU_INTENSIVE");
   const [mix, setMix] = useState<ClientMixOption>("cpu");
   const [lambdaRate, setLambdaRate] = useState<number>(3);
   const [streaming, setStreaming] = useState<boolean>(false);
@@ -86,21 +83,6 @@ export const ClientPage: React.FC = () => {
     taskId?: string;
     timestamp: string;
   } | null>(null);
-
-  // Interactive site widget states
-  const [searchQuery, setSearchQuery] = useState<string>("Production Auth Logs");
-  const [selectedReport, setSelectedReport] = useState<string>(
-    "Q4 Revenue & Region Cohort"
-  );
-  const [selectedAiJob, setSelectedAiJob] = useState<string>(
-    "LLaMA-3 70B Tensor Inference"
-  );
-  const [selectedDataset, setSelectedDataset] = useState<string>(
-    "10M-Node Social Graph Index (1 GB)"
-  );
-  const [taskActionLabels, setTaskActionLabels] = useState<Record<string, string>>(
-    {}
-  );
 
   const streamingRef = useRef<boolean>(false);
   const lambdaRef = useRef<number>(lambdaRate);
@@ -151,23 +133,18 @@ export const ClientPage: React.FC = () => {
   const sendSingleTask = useCallback(
     async (explicitType?: TaskType, actionLabel?: string) => {
       const cid = sanitizeClientIdLocal(clientIdRef.current);
-      const tType = explicitType ?? sampleTaskFromMix(mixRef.current);
+      const tType = explicitType ?? selectedTaskType;
       try {
         setLastError(null);
         const res = await submitTask(cid, tType);
         const taskId =
           typeof res.task_id === "string" ? res.task_id : undefined;
-        if (taskId && actionLabel) {
-          setTaskActionLabels((prev) => ({ ...prev, [taskId]: actionLabel }));
-        }
-        if (actionLabel) {
-          setLastActionBanner({
-            label: actionLabel,
-            taskType: tType,
-            taskId,
-            timestamp: new Date().toLocaleTimeString(),
-          });
-        }
+        setLastActionBanner({
+          label: actionLabel || `Sent ${tType}`,
+          taskType: tType,
+          taskId,
+          timestamp: new Date().toLocaleTimeString(),
+        });
         setSentCount((c) => c + 1);
         scheduleDelayedSync();
       } catch (err) {
@@ -176,7 +153,7 @@ export const ClientPage: React.FC = () => {
         );
       }
     },
-    [scheduleDelayedSync]
+    [selectedTaskType, scheduleDelayedSync]
   );
 
   useEffect(() => {
@@ -195,7 +172,8 @@ export const ClientPage: React.FC = () => {
       const delayMs = samplePoissonDelayMs(lambdaRef.current);
       timerRef.current = window.setTimeout(async () => {
         if (!streamingRef.current) return;
-        await sendSingleTask(undefined, "Auto-Stream Request");
+        const autoType = sampleTaskFromMix(mixRef.current);
+        await sendSingleTask(autoType, "Auto-Stream Request");
         scheduleNext();
       }, delayMs);
     };
@@ -223,8 +201,8 @@ export const ClientPage: React.FC = () => {
         isStale={isStale}
       />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Top Client Identity & Live Cluster Routing Bar */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
+        {/* Top Identity & Routing Status Bar */}
         <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -233,35 +211,33 @@ export const ClientPage: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-base font-bold text-white">
-                  CloudBalance Interactive Client Portal
+                  CloudBalance Client Portal
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Interact with any cloud service below. Your browser only sends{" "}
-                  <code className="text-cyan-300">{`{ client_id, task_type }`}</code>{" "}
-                  to the single Controller entry point; OR-Tools MILP routes your request to the optimal internal Worker VM.
+                  Single entry point for client devices. Submit individual tasks or stream Poisson workloads to the Controller.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
               <div className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
-                Active Identity:{" "}
+                Active Client ID:{" "}
                 <span className="text-cyan-300 font-bold">
                   {normalizedClientId}
                 </span>
               </div>
               <div className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
-                Requests Sent:{" "}
+                Total Sent:{" "}
                 <span className="text-emerald-400 font-bold">{sentCount}</span>
               </div>
             </div>
           </div>
 
-          {/* Quick Identity Switcher + Served-By Worker Distribution */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-800/80">
+          {/* Quick Preset Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-800/80">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs text-slate-400 mr-1">
-                Select Device ID:
+                Preset Devices:
               </span>
               {PRESET_CLIENTS.map((preset) => (
                 <button
@@ -311,7 +287,7 @@ export const ClientPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
                 <span className="text-slate-200">
-                  Triggered <strong>{lastActionBanner.label}</strong>
+                  {lastActionBanner.label}
                 </span>
                 <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 font-mono text-cyan-300">
                   {lastActionBanner.taskType}
@@ -329,435 +305,154 @@ export const ClientPage: React.FC = () => {
           )}
         </section>
 
-        {/* Interactive Cloud Application Modules (4 Real User Interactions) */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* 1. Lightweight Query — Search & DB Lookup */}
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg flex flex-col justify-between space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-300">
-                    <Search className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">
-                      1. Cloud Search & Instant DB Lookup
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Fast indexed lookup · Resolves to{" "}
-                      <code className="text-sky-300">LIGHTWEIGHT_QUERY</code>{" "}
-                      (10% CPU · 128 MB RAM)
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 space-y-2">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search logs, users, or records..."
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-sky-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void sendSingleTask(
-                        "LIGHTWEIGHT_QUERY",
-                        `DB Search: "${searchQuery || "All Records"}"`
-                      )
-                    }
-                    className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition shrink-0"
-                  >
-                    Run Query
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    "User Session Lookup",
-                    "Product Inventory",
-                    "API Latency P95",
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => {
-                        setSearchQuery(preset);
-                        void sendSingleTask(
-                          "LIGHTWEIGHT_QUERY",
-                          `Quick Query: "${preset}"`
-                        );
-                      }}
-                      className="px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] transition"
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+        {/* Core Controls Card: Send Task & Stream Options */}
+        <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-6 shadow-lg space-y-6">
+          <div className="border-b border-slate-800 pb-3 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-cyan-400" />
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+              Laptop Client Workload Generator (/client)
+            </h2>
           </div>
 
-          {/* 2. Balanced Compute — Analytics Report Compiler */}
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg flex flex-col justify-between space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
-                  <BarChart3 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    2. Analytics Report & Chart Compiler
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Multi-table aggregation · Resolves to{" "}
-                    <code className="text-emerald-300">BALANCED_COMPUTE</code>{" "}
-                    (25% CPU · 512 MB RAM)
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <select
-                  value={selectedReport}
-                  onChange={(e) => setSelectedReport(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="Q4 Revenue & Region Cohort">
-                    Q4 Revenue & Region Cohort
-                  </option>
-                  <option value="Real-Time Traffic Anomaly Audit">
-                    Real-Time Traffic Anomaly Audit
-                  </option>
-                  <option value="Cluster SLA & Latency Percentile Report">
-                    Cluster SLA & Latency Percentile Report
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void sendSingleTask(
-                      "BALANCED_COMPUTE",
-                      `Compile Report: ${selectedReport}`
-                    )
-                  }
-                  className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shrink-0"
-                >
-                  Compile Report
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. CPU Intensive — AI Inference & 4K Render Studio */}
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg flex flex-col justify-between space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300">
-                  <Cpu className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    3. Neural AI Inference & 4K Render Studio
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Heavy matrix compute · Resolves to{" "}
-                    <code className="text-amber-300">CPU_INTENSIVE</code> (35%
-                    CPU · 256 MB RAM)
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <select
-                  value={selectedAiJob}
-                  onChange={(e) => setSelectedAiJob(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
-                >
-                  <option value="LLaMA-3 70B Tensor Inference">
-                    LLaMA-3 70B Tensor Inference
-                  </option>
-                  <option value="4K Raytraced Frame Pass (2400x2400)">
-                    4K Raytraced Frame Pass (2400x2400)
-                  </option>
-                  <option value="Deep ResNet-152 Image Batch">
-                    Deep ResNet-152 Image Batch
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void sendSingleTask(
-                      "CPU_INTENSIVE",
-                      `AI Compute: ${selectedAiJob}`
-                    )
-                  }
-                  className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shrink-0"
-                >
-                  Run AI Job
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* 4. Memory Intensive — In-Memory Big Data Graph Loader */}
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg flex flex-col justify-between space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-300">
-                  <Database className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    4. In-Memory Big Data Graph Engine
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    High RAM allocation · Resolves to{" "}
-                    <code className="text-purple-300">MEMORY_INTENSIVE</code>{" "}
-                    (15% CPU · 1024 MB RAM)
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <select
-                  value={selectedDataset}
-                  onChange={(e) => setSelectedDataset(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-purple-500"
-                >
-                  <option value="10M-Node Social Graph Index (1 GB)">
-                    10M-Node Social Graph Index (1 GB)
-                  </option>
-                  <option value="Genomic Sequence Alignment Matrix">
-                    Genomic Sequence Alignment Matrix
-                  </option>
-                  <option value="In-Memory Fraud Tensor Cube">
-                    In-Memory Fraud Tensor Cube
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void sendSingleTask(
-                      "MEMORY_INTENSIVE",
-                      `RAM Graph Load: ${selectedDataset}`
-                    )
-                  }
-                  className="px-3.5 py-1.5 rounded-lg bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold text-xs transition shrink-0"
-                >
-                  Load into RAM
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Live Internal Worker VMs Strip (Real-Time Feedback on Client Page) */}
-        {snapshot && snapshot.workers.length > 0 && (
-          <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 shadow-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Server className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Live Internal Worker VMs (Real-Time Load Balancing View)
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* OPTION 1: SEND TASK */}
+            <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-4">
+              <div className="flex items-center gap-2 text-cyan-300 border-b border-slate-800 pb-2">
+                <Send className="w-4 h-4" />
+                <h3 className="text-xs font-bold uppercase tracking-wider">
+                  Option 1: Send Single Task
                 </h3>
               </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                Active Scheduler:{" "}
-                <strong className="text-cyan-300">
-                  {snapshot.active_scheduler}
-                </strong>
-              </span>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {snapshot.workers.map((w) => (
-                <div
-                  key={w.worker_id}
-                  className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-mono font-bold text-white">
-                      {w.worker_id}{" "}
-                      <span className="text-[10px] text-slate-500 font-normal">
-                        ({w.ip_address}:{w.port})
-                      </span>
-                    </span>
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
-                        w.status === "CRITICAL"
-                          ? "bg-rose-500/20 text-rose-300"
-                          : w.status === "MODERATE"
-                          ? "bg-amber-500/20 text-amber-300"
-                          : "bg-emerald-500/20 text-emerald-300"
-                      }`}
-                    >
-                      {w.status}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-[11px] font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">CPU</span>
-                      <span className="text-cyan-300">
-                        {w.cpu_percent.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          w.cpu_percent >= 85
-                            ? "bg-rose-500"
-                            : w.cpu_percent >= 60
-                            ? "bg-amber-400"
-                            : "bg-cyan-400"
-                        }`}
-                        style={{ width: `${Math.min(100, w.cpu_percent)}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between pt-1">
-                      <span className="text-slate-400">RAM</span>
-                      <span className="text-purple-300">
-                        {Math.round(w.memory_used_mb)} /{" "}
-                        {Math.round(w.memory_total_mb)} MB (
-                        {w.memory_percent.toFixed(1)}%)
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-400 transition-all duration-300"
-                        style={{ width: `${Math.min(100, w.memory_percent)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Automated Poisson Stream Generator Card (Preserved for Stress Testing) */}
-        <section className="rounded-xl bg-slate-900/90 border border-slate-800 p-6 shadow-lg space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300">
-                <Activity className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-white">
-                  Laptop Client Workload Generator (/client) — Automated Poisson Stream
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Optional continuous Poisson request stream (
-                  <code>dt = -ln(1 - U) / &lambda;</code>) for hands-free load testing.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Client ID Input */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="client-id-input"
-                className="block text-xs font-medium text-slate-300"
-              >
-                Client Laptop Identifier
-              </label>
-              <input
-                id="client-id-input"
-                type="text"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder="e.g. laptop-alpha"
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm font-mono text-white focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            {/* Workload Mix Selector */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="workload-mix-select"
-                className="block text-xs font-medium text-slate-300"
-              >
-                Workload Resource Mix
-              </label>
-              <select
-                id="workload-mix-select"
-                value={mix}
-                onChange={(e) => setMix(e.target.value as ClientMixOption)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-cyan-500"
-              >
-                <option value="cpu">CPU Heavy (65% CPU_INTENSIVE)</option>
-                <option value="mem">Memory Heavy (65% MEMORY_INTENSIVE)</option>
-                <option value="balanced">Balanced Mix (All 4 Profiles)</option>
-              </select>
-            </div>
-
-            {/* Poisson Lambda Slider */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
+              <div className="space-y-2">
                 <label
-                  htmlFor="client-lambda-slider"
-                  className="font-medium text-slate-300"
+                  htmlFor="task-type-select"
+                  className="block text-xs font-medium text-slate-300"
                 >
-                  Poisson Arrival Rate (&lambda;)
+                  Select Task Type
                 </label>
-                <span className="font-mono font-bold text-cyan-300">
-                  {lambdaRate} tasks/s
-                </span>
+                <select
+                  id="task-type-select"
+                  value={selectedTaskType}
+                  onChange={(e) => setSelectedTaskType(e.target.value as TaskType)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="CPU_INTENSIVE">
+                    CPU_INTENSIVE (35% CPU · 256 MB RAM)
+                  </option>
+                  <option value="MEMORY_INTENSIVE">
+                    MEMORY_INTENSIVE (15% CPU · 1024 MB RAM)
+                  </option>
+                  <option value="BALANCED_COMPUTE">
+                    BALANCED_COMPUTE (25% CPU · 512 MB RAM)
+                  </option>
+                  <option value="LIGHTWEIGHT_QUERY">
+                    LIGHTWEIGHT_QUERY (10% CPU · 128 MB RAM)
+                  </option>
+                </select>
               </div>
-              <input
-                id="client-lambda-slider"
-                type="range"
-                min={1}
-                max={15}
-                step={1}
-                value={lambdaRate}
-                onChange={(e) => setLambdaRate(Number(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer mt-2"
-              />
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => void sendSingleTask(selectedTaskType, "Manual Single Task")}
+                  className="flex-1 px-4 py-2.5 rounded-lg text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 transition shadow-lg shadow-cyan-500/10"
+                >
+                  <Send className="w-4 h-4" />
+                  Send Task
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void sendSingleTask("CPU_INTENSIVE", "Manual Heavy Matrix Task")
+                  }
+                  className="px-4 py-2.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-2 transition"
+                >
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  Send one heavy task
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              type="button"
-              onClick={() => setStreaming((s) => !s)}
-              className={`px-5 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
-                streaming
-                  ? "bg-rose-500 hover:bg-rose-400 text-slate-950"
-                  : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-              }`}
-            >
-              {streaming ? (
-                <>
-                  <Square className="w-4 h-4 fill-current" />
-                  Stop Stream
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current" />
-                  Start Stream
-                </>
-              )}
-            </button>
+            {/* OPTION 2: STREAM OPTIONS */}
+            <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800/90 space-y-4">
+              <div className="flex items-center gap-2 text-purple-300 border-b border-slate-800 pb-2">
+                <Activity className="w-4 h-4" />
+                <h3 className="text-xs font-bold uppercase tracking-wider">
+                  Option 2: Stream Options (Poisson Arrival)
+                </h3>
+              </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                void sendSingleTask(
-                  "CPU_INTENSIVE",
-                  "Manual Heavy Matrix Task"
-                )
-              }
-              className="px-4 py-2.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-2 transition"
-            >
-              <Zap className="w-4 h-4 text-amber-400" />
-              Send one heavy task
-            </button>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="stream-mix-select"
+                    className="block text-xs font-medium text-slate-300"
+                  >
+                    Stream Mix Profile
+                  </label>
+                  <select
+                    id="stream-mix-select"
+                    value={mix}
+                    onChange={(e) => setMix(e.target.value as ClientMixOption)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  >
+                    <option value="cpu">CPU Heavy (65%)</option>
+                    <option value="mem">RAM Heavy (65%)</option>
+                    <option value="balanced">Balanced (Mix)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <label
+                      htmlFor="client-lambda-slider"
+                      className="font-medium text-slate-300"
+                    >
+                      Rate (&lambda;)
+                    </label>
+                    <span className="font-mono font-bold text-purple-300">
+                      {lambdaRate} req/s
+                    </span>
+                  </div>
+                  <input
+                    id="client-lambda-slider"
+                    type="range"
+                    min={1}
+                    max={15}
+                    step={1}
+                    value={lambdaRate}
+                    onChange={(e) => setLambdaRate(Number(e.target.value))}
+                    className="w-full accent-purple-400 cursor-pointer mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setStreaming((s) => !s)}
+                  className={`w-full py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-lg ${
+                    streaming
+                      ? "bg-rose-500 hover:bg-rose-400 text-slate-950 shadow-rose-500/20"
+                      : "bg-purple-500 hover:bg-purple-400 text-slate-950 shadow-purple-500/20"
+                  }`}
+                >
+                  {streaming ? (
+                    <>
+                      <Square className="w-4 h-4 fill-current" />
+                      Stop Stream
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 fill-current" />
+                      Start Stream
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -772,8 +467,7 @@ export const ClientPage: React.FC = () => {
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Real-time visibility into which internal Worker VM served each
-                interaction from this device
+                Real-time visibility into which internal Worker VM served each request
               </p>
             </div>
             <span className="text-xs font-mono text-slate-400">
@@ -785,8 +479,7 @@ export const ClientPage: React.FC = () => {
             <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-lg">
               No requests recorded for{" "}
               <code className="text-cyan-300">{normalizedClientId}</code> yet.
-              Click any interactive service card above (`Run Query`,{" "}
-              `Compile Report`, `Run AI Job`, `Load into RAM`).
+              Click <strong className="text-white">Send Task</strong> or <strong className="text-white">Start Stream</strong> above.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -794,9 +487,9 @@ export const ClientPage: React.FC = () => {
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 uppercase text-[11px]">
                     <th className="py-2 px-3">Task ID</th>
-                    <th className="py-2 px-3">Interaction / Task Type</th>
+                    <th className="py-2 px-3">Task Type</th>
                     <th className="py-2 px-3">Server Profile</th>
-                    <th className="py-2 px-3">Assigned Internal VM</th>
+                    <th className="py-2 px-3">Assigned Worker</th>
                     <th className="py-2 px-3">Scheduler</th>
                     <th className="py-2 px-3">Exec Time</th>
                     <th className="py-2 px-3">Status</th>
@@ -806,15 +499,8 @@ export const ClientPage: React.FC = () => {
                   {ownTasks.map((t) => (
                     <tr key={t.task_id} className="hover:bg-slate-800/40">
                       <td className="py-2 px-3 text-slate-300">{t.task_id}</td>
-                      <td className="py-2 px-3">
-                        <div className="text-white font-semibold">
-                          {t.task_type}
-                        </div>
-                        {taskActionLabels[t.task_id] && (
-                          <div className="text-[10px] text-slate-400 font-sans">
-                            {taskActionLabels[t.task_id]}
-                          </div>
-                        )}
+                      <td className="py-2 px-3 text-white font-semibold">
+                        {t.task_type}
                       </td>
                       <td className="py-2 px-3 text-slate-400">
                         {t.cpu_demand_pct}% CPU / {t.mem_demand_mb} MB
