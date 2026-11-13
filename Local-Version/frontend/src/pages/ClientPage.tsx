@@ -9,7 +9,6 @@ import {
   Send,
   Sparkles,
   Square,
-  Zap,
 } from "lucide-react";
 import { Header } from "../components/Header";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -57,14 +56,6 @@ function sanitizeClientIdLocal(raw: string): string {
     .replace(/^-+|-+$/g, "");
   return (cleaned || "laptop-alpha").slice(0, 64);
 }
-
-const PRESET_CLIENTS: { id: string; mix: ClientMixOption; label: string }[] = [
-  { id: "laptop-alpha", mix: "cpu", label: "laptop-alpha (CPU)" },
-  { id: "laptop-beta", mix: "mem", label: "laptop-beta (RAM)" },
-  { id: "laptop-gamma", mix: "balanced", label: "laptop-gamma (Mix)" },
-  { id: "mobile-1", mix: "cpu", label: "mobile-1" },
-  { id: "mobile-2", mix: "mem", label: "mobile-2" },
-];
 
 export const ClientPage: React.FC = () => {
   const { snapshot, connectionState, isStale, refreshNow } = useWebSocket();
@@ -189,9 +180,6 @@ export const ClientPage: React.FC = () => {
   }, [streaming, sendSingleTask]);
 
   const normalizedClientId = sanitizeClientIdLocal(clientId);
-  const myClientStats = snapshot?.clients.find(
-    (c) => c.client_id === normalizedClientId
-  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -220,57 +208,21 @@ export const ClientPage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
-                Active Client ID:{" "}
-                <span className="text-cyan-300 font-bold">
-                  {normalizedClientId}
-                </span>
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
+                <span className="text-slate-400">Client ID:</span>
+                <input
+                  type="text"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="bg-transparent text-cyan-300 font-bold w-28 focus:outline-none focus:underline"
+                  placeholder="laptop-alpha"
+                />
               </div>
               <div className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
                 Total Sent:{" "}
                 <span className="text-emerald-400 font-bold">{sentCount}</span>
               </div>
             </div>
-          </div>
-
-          {/* Quick Preset Selector */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-800/80">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-slate-400 mr-1">
-                Preset Devices:
-              </span>
-              {PRESET_CLIENTS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => {
-                    setClientId(preset.id);
-                    setMix(preset.mix);
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-xs font-mono border transition ${
-                    normalizedClientId === preset.id
-                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 font-semibold"
-                      : "bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-
-            {myClientStats && Object.keys(myClientStats.served_by).length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-                <span className="text-slate-400">Served by VMs:</span>
-                {Object.entries(myClientStats.served_by).map(([wid, count]) => (
-                  <span
-                    key={wid}
-                    className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
-                  >
-                    {wid}: {count}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
 
           {lastError && (
@@ -352,25 +304,14 @@ export const ClientPage: React.FC = () => {
                 </select>
               </div>
 
-              <div className="flex flex-wrap gap-3 pt-2">
+              <div className="pt-2">
                 <button
                   type="button"
                   onClick={() => void sendSingleTask(selectedTaskType, "Manual Single Task")}
-                  className="flex-1 px-4 py-2.5 rounded-lg text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 transition shadow-lg shadow-cyan-500/10"
+                  className="w-full px-4 py-2.5 rounded-lg text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 transition shadow-lg shadow-cyan-500/10"
                 >
                   <Send className="w-4 h-4" />
                   Send Task
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void sendSingleTask("CPU_INTENSIVE", "Manual Heavy Matrix Task")
-                  }
-                  className="px-4 py-2.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-2 transition"
-                >
-                  <Zap className="w-4 h-4 text-amber-400" />
-                  Send one heavy task
                 </button>
               </div>
             </div>
