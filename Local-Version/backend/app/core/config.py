@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CB_MONGO_DB_NAME", "MONGO_DB_NAME"),
     )
     local_mode: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("CB_LOCAL_MODE", "LOCAL_MODE"),
     )
 
