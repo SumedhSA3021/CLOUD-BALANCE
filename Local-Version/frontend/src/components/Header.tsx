@@ -6,7 +6,6 @@ import {
   BarChart3,
   Cpu,
   Gauge,
-  Laptop,
   Layers,
   Radio,
 } from "lucide-react";
@@ -35,7 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
 }) => {
   const location = useLocation();
-  const isClientPage = location.pathname.startsWith("/client");
+  void activeTab;
+  void onTabChange;
 
   const statusColor =
     connectionState === "CONNECTED" && !isStale
@@ -75,40 +75,36 @@ export const Header: React.FC<HeaderProps> = ({
           <nav className="flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-lg border border-slate-800">
             <Link
               to="/"
-              onClick={() => onTabChange?.("ops")}
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
-                !isClientPage && activeTab === "ops"
+                location.pathname === "/"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              Tasks (/)
+            </Link>
+            <Link
+              to="/ops"
+              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
+                location.pathname.startsWith("/ops")
                   ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
               <Activity className="w-3.5 h-3.5" />
-              Ops Center
+              Ops Center (/ops)
             </Link>
-            {!isClientPage && onTabChange && (
-              <button
-                type="button"
-                onClick={() => onTabChange("benchmark")}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
-                  activeTab === "benchmark"
-                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-                Benchmark Lab
-              </button>
-            )}
             <Link
-              to="/client"
+              to="/benchmark"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
-                isClientPage
+                location.pathname.startsWith("/benchmark")
                   ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
-              <Laptop className="w-3.5 h-3.5" />
-              Laptop Client (/client)
+              <BarChart3 className="w-3.5 h-3.5" />
+              Benchmark Lab
             </Link>
           </nav>
         </div>

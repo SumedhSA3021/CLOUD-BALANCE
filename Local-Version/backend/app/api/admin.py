@@ -19,7 +19,7 @@ import uuid
 from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -286,21 +286,30 @@ async def get_stats_summary(
 
 @admin_router.get("/stats/download")
 async def download_stats_summary(
+    file: str = Query(default="summary", description="'summary' or 'log'"),
     _auth: None = Depends(verify_admin_token),
 ) -> FileResponse:
-    """Download data/test_summary.csv."""
+    """Download data/test_summary.csv or data/test_log.csv."""
     csv_logger.flush()
-    if not TEST_SUMMARY_PATH.exists():
-        # Create empty with header
-        TEST_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(TEST_SUMMARY_PATH, "w", newline="", encoding="utf-8") as f:
+    if file.lower() == "log":
+        target_path = TEST_LOG_PATH
+        filename = "test_log.csv"
+        cols = csv_logger._log_columns
+    else:
+        target_path = TEST_SUMMARY_PATH
+        filename = "test_summary.csv"
+        cols = TEST_SUMMARY_COLUMNS
+
+    if not target_path.exists():
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(TEST_SUMMARY_COLUMNS)
+            writer.writerow(cols if isinstance(cols, list) else cols)
 
     return FileResponse(
-        path=str(TEST_SUMMARY_PATH),
+        path=str(target_path),
         media_type="text/csv",
-        filename="test_summary.csv",
+        filename=filename,
     )
 
 

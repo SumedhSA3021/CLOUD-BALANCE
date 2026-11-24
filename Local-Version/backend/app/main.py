@@ -169,6 +169,14 @@ def create_app(
         async def serve_dashboard_spa() -> FileResponse:
             return FileResponse(str(index_html))
 
+        @application.get("/ops", include_in_schema=False)
+        async def serve_ops_spa() -> FileResponse:
+            return FileResponse(str(index_html))
+
+        @application.get("/benchmark", include_in_schema=False)
+        async def serve_benchmark_spa() -> FileResponse:
+            return FileResponse(str(index_html))
+
         @application.get("/client", include_in_schema=False)
         async def serve_client_spa() -> FileResponse:
             return FileResponse(str(index_html))

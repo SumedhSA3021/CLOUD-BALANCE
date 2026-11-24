@@ -14,10 +14,12 @@ import {
 } from "../lib/api";
 import type { SchedulerName } from "../lib/types";
 
-export const DashboardPage: React.FC = () => {
+export const DashboardPage: React.FC<{ initialTab?: "ops" | "benchmark" }> = ({
+  initialTab = "benchmark",
+}) => {
   const { snapshot, history, connectionState, isStale, error, refreshNow } =
     useWebSocket();
-  const [activeTab, setActiveTab] = useState<"ops" | "benchmark">("ops");
+  const [activeTab, setActiveTab] = useState<"ops" | "benchmark">(initialTab);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const handleSelectScheduler = async (sched: SchedulerName) => {
@@ -142,11 +144,10 @@ export const DashboardPage: React.FC = () => {
                         return (
                           <React.Fragment key={wid}>
                             <span
-                              className={`px-2.5 py-1 rounded font-bold transition duration-200 ${
-                                isCurrentTarget
-                                  ? "bg-cyan-500 text-slate-950 ring-2 ring-cyan-300 shadow-md shadow-cyan-500/40 scale-105"
-                                  : "bg-slate-900 border border-slate-700 text-slate-400"
-                              }`}
+                              className={`px-2.5 py-1 rounded font-bold transition duration-200 ${isCurrentTarget
+                                ? "bg-cyan-500 text-slate-950 ring-2 ring-cyan-300 shadow-md shadow-cyan-500/40 scale-105"
+                                : "bg-slate-900 border border-slate-700 text-slate-400"
+                                }`}
                             >
                               {wid}
                             </span>

@@ -139,3 +139,141 @@ export async function runNewBenchmark(
   );
 }
 
+// --- Shared Contract API Types and Helpers (D1, D2, D3, D4) ---
+
+export interface TaskContractRequest {
+  client_id: string;
+  task_type: "light" | "heavy" | string;
+  size?: number;
+  sent_at?: number | string;
+  payload?: any;
+}
+
+export interface TaskContractResponse {
+  result: Record<string, any>;
+  assigned_worker: string;
+  queue_ms: number;
+  exec_ms: number;
+  total_ms: number;
+}
+
+export interface TestStatusResponse {
+  state: "idle" | "armed" | "running" | "draining";
+  test_id?: string | null;
+  mode?: string | null;
+  start_at?: number | null;
+  duration_s?: number | null;
+  seed?: number | null;
+  lambda_per_client?: number | null;
+  heavy_ratio?: number | null;
+}
+
+export interface TestSummaryRow {
+  test_id: string;
+  mode: string;
+  seed: string;
+  duration_s: string;
+  lambda_per_client: string;
+  heavy_ratio: string;
+  requests: string;
+  failed: string;
+  avg_ms: string;
+  p50_ms: string;
+  p95_ms: string;
+  max_ms: string;
+  max_queue_ms: string;
+  throughput_rps: string;
+  worker1_busy_ms: string;
+  worker2_busy_ms: string;
+  worker3_busy_ms: string;
+  busy_time_stddev: string;
+}
+
+export async function submitContractTask(
+  req: TaskContractRequest
+): Promise<TaskContractResponse> {
+  return requestJson<TaskContractResponse>("/tasks", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function fetchTestStatus(): Promise<TestStatusResponse> {
+  return requestJson<TestStatusResponse>("/test/status");
+}
+
+export async function startAdminTest(
+  token: string,
+  payload: {
+    mode: string;
+    duration_s: number;
+    lambda_per_client: number;
+    heavy_ratio: number;
+    seed: number;
+  }
+): Promise<TestStatusResponse> {
+  return requestJson<TestStatusResponse>("/admin/test/start", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function stopAdminTest(
+  token: string
+): Promise<TestStatusResponse> {
+  return requestJson<TestStatusResponse>("/admin/test/stop", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function fetchStatsSummary(
+  token: string
+): Promise<TestSummaryRow[]> {
+  return requestJson<TestSummaryRow[]>("/admin/stats/summary", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export async function downloadStatsFile(
+  token: string,
+  file: "summary" | "log" = "summary"
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/stats/download?file=${file}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Download failed: HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file === "log" ? "test_log.csv" : "test_summary.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function resetStats(
+  token: string
+): Promise<{ status: string; detail: string }> {
+  return requestJson<{ status: string; detail: string }>("/admin/stats/reset", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+

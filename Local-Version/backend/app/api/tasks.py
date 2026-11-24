@@ -38,6 +38,7 @@ class TaskContractRequest(BaseModel):
     task_type: str = Field(default="light", description="'light' or 'heavy'")
     size: int | None = Field(default=None, description="Optional payload size or iterations")
     sent_at: float | str | None = Field(default=None, description="Client departure timestamp")
+    payload: dict[str, Any] | None = Field(default=None, description="Optional custom task payload")
 
 
 class TaskContractResponse(BaseModel):
@@ -154,7 +155,13 @@ async def execute_task_contract(
     worker_port = port_map.get(assigned_worker, 8001)
     worker_url = f"http://{worker_ip}:{worker_port}/execute"
 
-    if t_type in ("light", "cgpa"):
+    if req.payload:
+        worker_payload = {
+            "task_id": task_id,
+            "task_type": "light" if t_type in ("light", "cgpa") else "heavy" if t_type in ("heavy", "hash", "hashing") else t_type,
+            "payload": req.payload,
+        }
+    elif t_type in ("light", "cgpa"):
         worker_payload = {
             "task_id": task_id,
             "task_type": "light",
