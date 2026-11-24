@@ -25,32 +25,43 @@ from app.models.schemas import (
 
 
 def test_task_profiles_exact_specifications() -> None:
-    """Verify server-side task profiles match exact CPU, RAM, matrix_dim, and duration specs."""
+    """Verify server-side task profiles match exact CPU, RAM, matrix_dim, and duration specs tuned for e2-micro."""
     cpu_p = resolve_task_profile(TaskType.CPU_INTENSIVE)
     assert cpu_p.cpu_demand_pct == 35.0
     assert cpu_p.mem_demand_mb == 256.0
-    assert cpu_p.matrix_dim == 2400
-    assert cpu_p.duration_sec == 4.0
+    assert cpu_p.matrix_dim == 1500
+    assert cpu_p.duration_sec == 3.0
 
     mem_p = resolve_task_profile("MEMORY_INTENSIVE")
     assert mem_p.cpu_demand_pct == 15.0
-    assert mem_p.mem_demand_mb == 1024.0
-    assert mem_p.matrix_dim == 4500
-    assert mem_p.duration_sec == 5.0
+    assert mem_p.mem_demand_mb == 384.0
+    assert mem_p.matrix_dim == 2200
+    assert mem_p.duration_sec == 3.0
 
     bal_p = resolve_task_profile(TaskType.BALANCED_COMPUTE)
     assert bal_p.cpu_demand_pct == 25.0
-    assert bal_p.mem_demand_mb == 512.0
-    assert bal_p.matrix_dim == 2000
+    assert bal_p.mem_demand_mb == 256.0
+    assert bal_p.matrix_dim == 1000
     assert bal_p.duration_sec == 3.0
 
     light_p = resolve_task_profile(TaskType.LIGHTWEIGHT_QUERY)
     assert light_p.cpu_demand_pct == 10.0
-    assert light_p.mem_demand_mb == 128.0
-    assert light_p.matrix_dim == 1000
+    assert light_p.mem_demand_mb == 96.0
+    assert light_p.matrix_dim == 500
     assert light_p.duration_sec == 1.5
 
-    assert len(TASK_PROFILES) == 4
+    # Verify Task B1/B2 additions
+    light_task = resolve_task_profile("light")
+    assert light_task.task_type == TaskType.LIGHT
+    assert light_task.cpu_demand_pct == 10.0
+    assert light_task.mem_demand_mb == 64.0
+
+    heavy_task = resolve_task_profile("heavy")
+    assert heavy_task.task_type == TaskType.HEAVY
+    assert heavy_task.cpu_demand_pct == 35.0
+    assert heavy_task.mem_demand_mb == 128.0
+
+    assert len(TASK_PROFILES) == 6
 
     with pytest.raises(ValueError, match="Unknown task_type"):
         resolve_task_profile("INVALID_TYPE")

@@ -15,7 +15,9 @@ from typing import Any
 
 import httpx
 import numpy as np
+import psutil
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 # Maximum allowed payload size: 64 KB default
@@ -51,6 +53,8 @@ class ExecuteTaskResponse(BaseModel):
     task_type: str = "legacy"
     status: str = "COMPLETED"
     execution_ms: float
+    queue_ms: float = 0.0
+    current_queue_length: int = 0
     result: dict[str, Any] = Field(default_factory=dict)
     active_task_count: int = 0
     matrix_dim: int = 0
@@ -79,10 +83,22 @@ class WorkerRuntimeState:
     max_physical_dim: int = field(
         default_factory=lambda: int(os.getenv("WORKER_MAX_PHYSICAL_DIM", "350"))
     )
+    concurrency_limit: int = field(
+        default_factory=lambda: int(os.getenv("WORKER_CONCURRENCY_LIMIT", "2"))
+    )
+    queue_capacity: int = field(
+        default_factory=lambda: int(os.getenv("WORKER_QUEUE_CAPACITY", "4"))
+    )
+    task_timeout_sec: float = field(
+        default_factory=lambda: float(os.getenv("WORKER_TASK_TIMEOUT_SEC", "10.0"))
+    )
     active_task_count: int = 0
+    current_queue_length: int = 0
     active_cpu_demand_pct: float = 0.0
     active_mem_demand_mb: float = 0.0
     total_completed: int = 0
+    total_rejected_503: int = 0
+    total_timeouts: int = 0
 
 
 def _calculate_cgpa(payload: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +259,9 @@ def create_worker_app(state: WorkerRuntimeState | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        _app.state.semaphore = asyncio.Semaphore(runtime.concurrency_limit)
+        _app.state.queue_lock = asyncio.Lock()
+
         agent_task: asyncio.Task[None] | None = None
         if enable_agent:
             from worker.agent import WorkerTelemetryAgent
@@ -273,13 +292,48 @@ def create_worker_app(state: WorkerRuntimeState | None = None) -> FastAPI:
     )
     app.state.runtime = runtime
 
+    def _get_semaphore() -> asyncio.Semaphore:
+        if not hasattr(app.state, "semaphore") or app.state.semaphore is None:
+            app.state.semaphore = asyncio.Semaphore(runtime.concurrency_limit)
+        return app.state.semaphore
+
+    def _get_queue_lock() -> asyncio.Lock:
+        if not hasattr(app.state, "queue_lock") or app.state.queue_lock is None:
+            app.state.queue_lock = asyncio.Lock()
+        return app.state.queue_lock
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {
             "status": "healthy",
             "worker_id": runtime.worker_id,
             "active_task_count": runtime.active_task_count,
+            "current_queue_length": runtime.current_queue_length,
+            "concurrency_limit": runtime.concurrency_limit,
+            "queue_capacity": runtime.queue_capacity,
             "total_completed": runtime.total_completed,
+            "total_rejected_503": runtime.total_rejected_503,
+            "total_timeouts": runtime.total_timeouts,
+        }
+
+    @app.get("/status")
+    async def status_endpoint() -> dict[str, Any]:
+        """Task B2: Status endpoint reporting psutil CPU %, RAM %, and current queue length."""
+        raw_cpu = float(psutil.cpu_percent(interval=None))
+        vm = psutil.virtual_memory()
+        return {
+            "status": "healthy",
+            "worker_id": runtime.worker_id,
+            "cpu_percent": round(raw_cpu, 2),
+            "ram_percent": round(float(vm.percent), 2),
+            "memory_percent": round(float(vm.percent), 2),
+            "current_queue_length": runtime.current_queue_length,
+            "active_task_count": runtime.active_task_count,
+            "concurrency_limit": runtime.concurrency_limit,
+            "queue_capacity": runtime.queue_capacity,
+            "total_completed": runtime.total_completed,
+            "total_rejected_503": runtime.total_rejected_503,
+            "total_timeouts": runtime.total_timeouts,
         }
 
     @app.get("/metrics")
@@ -289,92 +343,157 @@ def create_worker_app(state: WorkerRuntimeState | None = None) -> FastAPI:
             "ip_address": runtime.ip_address,
             "port": runtime.port,
             "active_task_count": runtime.active_task_count,
+            "current_queue_length": runtime.current_queue_length,
+            "concurrency_limit": runtime.concurrency_limit,
+            "queue_capacity": runtime.queue_capacity,
             "active_cpu_demand_pct": round(runtime.active_cpu_demand_pct, 2),
             "active_mem_demand_mb": round(runtime.active_mem_demand_mb, 2),
             "total_mem_mb": runtime.total_mem_mb,
             "base_cpu_pct": runtime.base_cpu_pct,
             "base_mem_mb": runtime.base_mem_mb,
             "total_completed": runtime.total_completed,
+            "total_rejected_503": runtime.total_rejected_503,
+            "total_timeouts": runtime.total_timeouts,
         }
 
     @app.post("/execute", response_model=ExecuteTaskResponse)
-    async def execute_workload(req: ExecuteTaskRequest, request: Request) -> ExecuteTaskResponse:
+    async def execute_workload(req: ExecuteTaskRequest, request: Request) -> Any:
+        semaphore = _get_semaphore()
+        queue_lock = _get_queue_lock()
+
         # 3. Reject payload sizes above a safe limit with a clear 4xx error.
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > MAX_PAYLOAD_BYTES:
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"Payload size ({content_length} bytes) exceeds maximum safe limit of {MAX_PAYLOAD_BYTES} bytes",
             )
         if len(str(req.payload)) > MAX_PAYLOAD_BYTES:
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"Payload size exceeds maximum safe limit of {MAX_PAYLOAD_BYTES} bytes",
             )
 
-        start_ns = time.perf_counter_ns()
-        runtime.active_task_count += 1
-        runtime.active_cpu_demand_pct += req.cpu_demand_pct
-        runtime.active_mem_demand_mb += req.mem_demand_mb
-        await _push_live_telemetry()
+        # 1 & 2. Bounded queue check: reject with 503 if queue is full
+        async with queue_lock:
+            if runtime.current_queue_length >= runtime.queue_capacity:
+                runtime.total_rejected_503 += 1
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={
+                        "status": "rejected_503",
+                        "detail": f"Worker {runtime.worker_id} queue full (current queue: {runtime.current_queue_length}, capacity: {runtime.queue_capacity})",
+                        "worker_id": runtime.worker_id,
+                        "task_id": req.task_id,
+                        "queue_length": runtime.current_queue_length,
+                        "concurrency_limit": runtime.concurrency_limit,
+                        "queue_capacity": runtime.queue_capacity,
+                    },
+                )
+            runtime.current_queue_length += 1
 
-        task_type = (req.task_type or "legacy").lower()
-        checksum = 0.0
-        result: dict[str, Any] = {}
+        queue_start_ns = time.perf_counter_ns()
+        task_timeout = float(
+            req.payload.get("timeout_sec", runtime.task_timeout_sec)
+            if isinstance(req.payload, dict) and "timeout_sec" in req.payload
+            else runtime.task_timeout_sec
+        )
 
+        acquired = False
         try:
-            # 1. task_type "light": CGPA calculation
-            if task_type in ("light", "cgpa"):
-                result = _calculate_cgpa(req.payload)
-                checksum = float(result.get("cgpa", 0.0))
-
-            # 2. task_type "heavy": hashing loop with configurable iterations
-            elif task_type in ("heavy", "hash", "hashing"):
-                result = await asyncio.to_thread(
-                    _run_heavy_hashing_loop,
-                    req.payload,
-                    DEFAULT_HEAVY_ITERATIONS,
+            try:
+                await asyncio.wait_for(semaphore.acquire(), timeout=task_timeout)
+                acquired = True
+            except asyncio.TimeoutError:
+                async with queue_lock:
+                    runtime.current_queue_length = max(0, runtime.current_queue_length - 1)
+                    runtime.total_timeouts += 1
+                waited_ms = (time.perf_counter_ns() - queue_start_ns) / 1_000_000.0
+                return JSONResponse(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    content={
+                        "status": "timeout",
+                        "detail": f"Task wait time exceeded timeout of {task_timeout}s",
+                        "worker_id": runtime.worker_id,
+                        "task_id": req.task_id,
+                        "queue_ms": round(waited_ms, 2),
+                        "concurrency_limit": runtime.concurrency_limit,
+                    },
                 )
-                checksum = float(int(result["final_hash"][:8], 16))
 
-            # Legacy compute workload (np.dot)
-            else:
-                physical_dim = max(16, min(req.matrix_dim, runtime.max_physical_dim))
-                effective_duration = max(0.01, req.duration_sec * runtime.time_scale)
-                seed = abs(hash(req.task_id)) % (2**31 - 1)
+            # Acquired semaphore: calculate queue_ms and decrement current_queue_length
+            queue_ms = (time.perf_counter_ns() - queue_start_ns) / 1_000_000.0
+            async with queue_lock:
+                runtime.current_queue_length = max(0, runtime.current_queue_length - 1)
 
-                checksum = await asyncio.to_thread(
-                    _run_numpy_dot_kernel,
-                    physical_dim,
-                    effective_duration,
-                    seed,
-                )
-                result = {"matrix_dim": req.matrix_dim, "checksum": checksum}
-
-            runtime.total_completed += 1
-        finally:
-            runtime.active_task_count = max(0, runtime.active_task_count - 1)
-            runtime.active_cpu_demand_pct = max(
-                0.0, runtime.active_cpu_demand_pct - req.cpu_demand_pct
-            )
-            runtime.active_mem_demand_mb = max(
-                0.0, runtime.active_mem_demand_mb - req.mem_demand_mb
-            )
+            # Execution phase
+            exec_start_ns = time.perf_counter_ns()
+            runtime.active_task_count += 1
+            runtime.active_cpu_demand_pct += req.cpu_demand_pct
+            runtime.active_mem_demand_mb += req.mem_demand_mb
             await _push_live_telemetry()
 
-        # 4. Return result plus exec_ms measured inside the worker.
-        elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-        return ExecuteTaskResponse(
-            task_id=req.task_id,
-            worker_id=runtime.worker_id,
-            task_type=task_type,
-            status="COMPLETED",
-            execution_ms=round(elapsed_ms, 2),
-            result=result,
-            matrix_dim=req.matrix_dim,
-            checksum=checksum,
-            active_task_count=runtime.active_task_count,
-        )
+            task_type = (req.task_type or "legacy").lower()
+            checksum = 0.0
+            result: dict[str, Any] = {}
+
+            try:
+                # 1. task_type "light": CGPA calculation
+                if task_type in ("light", "cgpa"):
+                    result = _calculate_cgpa(req.payload)
+                    checksum = float(result.get("cgpa", 0.0))
+
+                # 2. task_type "heavy": hashing loop with configurable iterations
+                elif task_type in ("heavy", "hash", "hashing"):
+                    result = await asyncio.to_thread(
+                        _run_heavy_hashing_loop,
+                        req.payload,
+                        DEFAULT_HEAVY_ITERATIONS,
+                    )
+                    checksum = float(int(result["final_hash"][:8], 16))
+
+                # Legacy compute workload (np.dot)
+                else:
+                    physical_dim = max(16, min(req.matrix_dim, runtime.max_physical_dim))
+                    effective_duration = max(0.01, req.duration_sec * runtime.time_scale)
+                    seed = abs(hash(req.task_id)) % (2**31 - 1)
+
+                    checksum = await asyncio.to_thread(
+                        _run_numpy_dot_kernel,
+                        physical_dim,
+                        effective_duration,
+                        seed,
+                    )
+                    result = {"matrix_dim": req.matrix_dim, "checksum": checksum}
+
+                runtime.total_completed += 1
+            finally:
+                runtime.active_task_count = max(0, runtime.active_task_count - 1)
+                runtime.active_cpu_demand_pct = max(
+                    0.0, runtime.active_cpu_demand_pct - req.cpu_demand_pct
+                )
+                runtime.active_mem_demand_mb = max(
+                    0.0, runtime.active_mem_demand_mb - req.mem_demand_mb
+                )
+                await _push_live_telemetry()
+
+            exec_elapsed_ms = (time.perf_counter_ns() - exec_start_ns) / 1_000_000.0
+            return ExecuteTaskResponse(
+                task_id=req.task_id,
+                worker_id=runtime.worker_id,
+                task_type=task_type,
+                status="COMPLETED",
+                execution_ms=round(exec_elapsed_ms, 2),
+                queue_ms=round(queue_ms, 2),
+                current_queue_length=runtime.current_queue_length,
+                result=result,
+                matrix_dim=req.matrix_dim,
+                checksum=checksum,
+                active_task_count=runtime.active_task_count,
+            )
+        finally:
+            if acquired:
+                semaphore.release()
 
     return app
 
