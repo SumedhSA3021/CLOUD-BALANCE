@@ -206,6 +206,8 @@ class MicroBatcherService:
                 mem_demand_mb=task.mem_demand_mb,
                 assigned_worker_id=assigned_wid,
                 scheduler=scheduler.name,
+                scheduler_used=task.scheduler_used or scheduler.name,
+                dispatch_seq=task.dispatch_seq,
                 solver_latency_ms=res.meta.solver_latency_ms,
                 queue_wait_ms=round(queue_wait_ms, 2),
                 status="DEGRADED_ASSIGNED" if res.meta.degraded else "ASSIGNED",

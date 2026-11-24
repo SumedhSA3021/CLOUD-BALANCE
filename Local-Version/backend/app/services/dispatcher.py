@@ -100,6 +100,53 @@ class DispatcherService:
                 await client.aclose()
         return 0.0
 
+    async def dispatch_direct_rr(
+        self,
+        task: Task,
+        worker: Telemetry,
+    ) -> tuple[str, str, float]:
+        """Dispatch a round-robin task directly to designated worker without touching MILP solver."""
+        payload = DispatchPayload(
+            task_id=task.task_id,
+            duration_sec=task.duration_sec,
+            matrix_dim=task.matrix_dim,
+            cpu_demand_pct=task.cpu_demand_pct,
+            mem_demand_mb=task.mem_demand_mb,
+        )
+        try:
+            exec_ms = await self._post_to_worker(worker, payload)
+            updated = self._history.update_assignment_status(
+                task_id=task.task_id,
+                status="COMPLETED",
+                execution_ms=exec_ms,
+                assigned_worker_id=worker.worker_id,
+            )
+            await self._history.sync_assignment_to_redis(updated)
+            logger.info(
+                "rr_task_execution_completed",
+                task_id=task.task_id,
+                client_id=task.client_id,
+                worker_id=worker.worker_id,
+                dispatch_seq=task.dispatch_seq,
+                execution_ms=exec_ms,
+            )
+            return worker.worker_id, "COMPLETED", exec_ms
+        except Exception as exc:
+            logger.warning(
+                "rr_direct_dispatch_failed",
+                task_id=task.task_id,
+                worker_id=worker.worker_id,
+                error=str(exc),
+            )
+            updated_fail = self._history.update_assignment_status(
+                task_id=task.task_id,
+                status="FAILED",
+                execution_ms=0.0,
+                assigned_worker_id=worker.worker_id,
+            )
+            await self._history.sync_assignment_to_redis(updated_fail)
+            return worker.worker_id, "FAILED", 0.0
+
     async def dispatch_task(
         self,
         task: Task,

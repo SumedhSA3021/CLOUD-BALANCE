@@ -85,6 +85,21 @@ class InMemoryTTLStore:
         async with self._lock:
             self._data.clear()
 
+    async def incr(self, name: str) -> int:
+        """Atomically increment integer value of key `name` by 1."""
+        now = time.monotonic()
+        async with self._lock:
+            entry = self._data.get(name)
+            if entry is None or entry[1] <= now:
+                new_val = 1
+            else:
+                try:
+                    new_val = int(entry[0]) + 1
+                except ValueError:
+                    new_val = 1
+            self._data[name] = (str(new_val), float("inf"))
+            return new_val
+
     async def close(self) -> None:
         """No-op close for interface compatibility."""
         return None
@@ -204,6 +219,17 @@ class DualRedisClient:
             except Exception:
                 pass
         await self._memory_store.flushdb()
+
+    async def incr(self, name: str) -> int:
+        """Atomically increment key `name` by 1."""
+        if not self._using_memory and self._redis is not None:
+            try:
+                res = await self._redis.incr(name)
+                return int(res)
+            except Exception as exc:
+                logger.warning("redis_incr_error_falling_back", error=str(exc))
+                self._using_memory = True
+        return await self._memory_store.incr(name)
 
     async def close(self) -> None:
         """Close underlying connections."""

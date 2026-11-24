@@ -13,6 +13,19 @@ from app.schedulers.base import BaseScheduler, BatchAssignmentResult, InFlightTr
 
 logger = get_logger("scheduler.ortools_milp")
 
+SOLVER_CALL_COUNT: int = 0
+
+
+def get_solver_call_count() -> int:
+    """Return the cumulative number of times the OR-Tools MILP solver was executed."""
+    return SOLVER_CALL_COUNT
+
+
+def reset_solver_call_count() -> None:
+    """Reset the MILP solver call counter to 0."""
+    global SOLVER_CALL_COUNT
+    SOLVER_CALL_COUNT = 0
+
 
 class ORToolsMILPScheduler(BaseScheduler):
     """Adaptive multi-resource MILP scheduler minimizing peak worker CPU utilization.
@@ -232,6 +245,9 @@ class ORToolsMILPScheduler(BaseScheduler):
 
         # Objective: minimize Z + 0.001 * peak projected memory pct
         solver.Minimize(z_var + 0.001 * m_var)
+
+        global SOLVER_CALL_COUNT
+        SOLVER_CALL_COUNT += 1
 
         status_code = solver.Solve()
         elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0

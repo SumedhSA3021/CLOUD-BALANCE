@@ -14,6 +14,7 @@ from app.models.schemas import (
     TaskRequest,
     TrafficControlRequest,
 )
+from app.schedulers.ortools_milp import get_solver_call_count, reset_solver_call_count
 from app.services.batcher import MicroBatcherService
 from app.services.broadcaster import WebSocketBroadcaster
 from app.services.cluster_state import ClusterStateService
@@ -36,6 +37,19 @@ async def switch_scheduler(
         "status": "updated",
         "active_scheduler": active,
     }
+
+
+@router.get("/solver-metrics")
+async def get_solver_metrics() -> dict[str, Any]:
+    """Retrieve cumulative OR-Tools solver call count."""
+    return {"solver_call_count": get_solver_call_count()}
+
+
+@router.post("/solver-metrics/reset")
+async def reset_solver_metrics() -> dict[str, Any]:
+    """Reset OR-Tools solver call count to 0."""
+    reset_solver_call_count()
+    return {"status": "reset", "solver_call_count": 0}
 
 
 @router.post("/traffic")

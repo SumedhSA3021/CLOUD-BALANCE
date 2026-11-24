@@ -69,6 +69,10 @@ class TaskRequest(BaseModel):
         ...,
         description="Server-resolved workload profile type",
     )
+    mode: str | None = Field(
+        default=None,
+        description="Optional scheduling mode override (e.g. 'round_robin', 'milp')",
+    )
 
     @field_validator("client_id", mode="before")
     @classmethod
@@ -95,14 +99,23 @@ class Task(BaseModel):
     mem_demand_mb: float = Field(..., gt=0.0)
     duration_sec: float = Field(..., gt=0.0)
     matrix_dim: int = Field(..., ge=10)
+    mode: str = Field(default="milp", description="Scheduling mode resolved once at arrival")
+    dispatch_seq: int | None = Field(default=None, description="Monotonic sequence number for round robin")
+    scheduler_used: str | None = Field(default=None, description="Actual scheduler used to dispatch")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     queued_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
-    def from_request(cls, req: TaskRequest, now: datetime | None = None) -> Task:
+    def from_request(
+        cls,
+        req: TaskRequest,
+        now: datetime | None = None,
+        mode: str = "milp",
+    ) -> Task:
         """Create an immutable internal Task by resolving the server-side profile table."""
         profile = resolve_task_profile(req.task_type)
         ts = now or datetime.now(UTC)
+        chosen_mode = req.mode or mode
         return cls(
             client_id=req.client_id,
             task_type=req.task_type,
@@ -110,6 +123,8 @@ class Task(BaseModel):
             mem_demand_mb=profile.mem_demand_mb,
             duration_sec=profile.duration_sec,
             matrix_dim=profile.matrix_dim,
+            mode=chosen_mode,
+            scheduler_used=chosen_mode,
             created_at=ts,
             queued_at=ts,
         )
@@ -130,6 +145,9 @@ class TaskSubmissionResponse(BaseModel):
     matrix_dim: int
     queue_depth: int
     queued_at: datetime
+    mode: str = "milp"
+    dispatch_seq: int | None = None
+    assigned_worker_id: str | None = None
 
 
 class Telemetry(BaseModel):
@@ -243,8 +261,10 @@ class Assignment(BaseModel):
     mem_demand_mb: float = 0.0
     assigned_worker_id: str
     scheduler: str
-    solver_latency_ms: float
-    queue_wait_ms: float
+    scheduler_used: str = ""
+    dispatch_seq: int | None = None
+    solver_latency_ms: float = 0.0
+    queue_wait_ms: float = 0.0
     execution_ms: float = 0.0
     status: str = "ASSIGNED"
     degraded: bool = False
