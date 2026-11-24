@@ -61,6 +61,7 @@ class ORToolsMILPScheduler(BaseScheduler):
         self.time_limit_ms = time_limit_ms
         self.cpu_cap_pct = cpu_cap_pct
         self.mem_cap_pct = mem_cap_pct
+        self._rr_tie_break: int = 0
 
     def _create_solver(self) -> pywraplp.Solver | None:
         solver = pywraplp.Solver.CreateSolver("CBC")
@@ -78,11 +79,13 @@ class ORToolsMILPScheduler(BaseScheduler):
         elapsed_ms: float,
         reason: str,
         record_in_flight: bool,
+        tie_break_costs: list[float] | None = None,
     ) -> BatchAssignmentResult:
         """Greedy lowest-projected-load assignment when the MILP is infeasible."""
         proj_cpus = list(base_cpus)
         proj_mems = list(base_mems)
         assignments: dict[str, str] = {}
+        tb_costs = tie_break_costs if tie_break_costs is not None else [0.0] * len(workers)
 
         for task in batch:
             best_j = 0
@@ -93,7 +96,13 @@ class ORToolsMILPScheduler(BaseScheduler):
                 # Penalize cap violations heavily while still picking lowest projected node
                 over_cpu = max(0.0, candidate_cpu - self.cpu_cap_pct) * 10.0
                 over_mem = max(0.0, candidate_mem_pct - self.mem_cap_pct) * 10.0
-                score = candidate_cpu + 0.05 * candidate_mem_pct + over_cpu + over_mem
+                score = (
+                    candidate_cpu
+                    + 0.05 * candidate_mem_pct
+                    + over_cpu
+                    + over_mem
+                    + (tb_costs[j] if j < len(tb_costs) else 0.0)
+                )
                 if score < best_score:
                     best_score = score
                     best_j = j
@@ -160,22 +169,39 @@ class ORToolsMILPScheduler(BaseScheduler):
                 ),
             )
 
+        from app.core.live_stats import live_dispatch_tracker
+
         num_tasks = len(batch)
         num_workers = len(workers)
+
+        self._rr_tie_break = (self._rr_tie_break + 1) % max(1, num_workers)
 
         base_cpus: list[float] = []
         base_mems: list[float] = []
         total_mems: list[float] = []
+        tie_break_costs: list[float] = []
 
-        for w in workers:
+        for j, w in enumerate(workers):
             if_cpu, if_mem, if_cnt = self.in_flight.get_worker_in_flight(w.worker_id, now_mono)
             inflight_count = max(if_cnt, self.in_flight.get_count(w.worker_id))
-            inflight_load = max(if_cpu, float(inflight_count) * 12.0)
-            queue_load = min(10.0, float(w.active_task_count) * 1.5)
+            inflight_load = max(if_cpu, float(inflight_count) * 15.0)
 
-            base_cpus.append(float(w.cpu_percent) + inflight_load + queue_load)
+            queue_len = float(
+                getattr(w, "queue_length", 0)
+                or getattr(w, "active_task_count", 0)
+                or 0
+            )
+            queue_load = min(20.0, queue_len * 5.0)
+
+            cumul_dispatched = live_dispatch_tracker.get_worker_cumulative(w.worker_id)
+            cumul_load = float(cumul_dispatched) * 0.05
+
+            base_cpus.append(float(w.cpu_percent) + inflight_load + queue_load + cumul_load)
             base_mems.append(float(w.memory_used_mb) + if_mem + (float(inflight_count) * 128.0))
             total_mems.append(max(1.0, float(w.memory_total_mb)))
+
+            rr_order = (j - self._rr_tie_break) % num_workers
+            tie_break_costs.append(float(cumul_dispatched) * 0.001 + float(rr_order) * 0.0001)
 
         if num_tasks == 0:
             elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
@@ -208,6 +234,7 @@ class ORToolsMILPScheduler(BaseScheduler):
                 elapsed_ms=elapsed_ms,
                 reason="SOLVER_UNAVAILABLE",
                 record_in_flight=record_in_flight,
+                tie_break_costs=tie_break_costs,
             )
 
         solver.SetTimeLimit(int(self.time_limit_ms))
@@ -247,8 +274,15 @@ class ORToolsMILPScheduler(BaseScheduler):
                 solver.Add(projected_cpu_expr <= z_var)
                 solver.Add((projected_mem_expr * (100.0 / total_mems[j])) <= m_var)
 
-        # Objective: minimize Z + 0.001 * peak projected memory pct
-        solver.Minimize(z_var + 0.001 * m_var)
+        # Objective: minimize Z + 0.001 * peak RAM % + tie-break penalty
+        # The tie-break penalty breaks equal-cost ties by fewest cumulative dispatches in current test,
+        # then round-robin order, spreading load evenly across all workers under light load.
+        tie_break_expr = sum(
+            tie_break_costs[j] * x_vars[i][j]
+            for i in range(num_tasks)
+            for j in range(num_workers)
+        )
+        solver.Minimize(z_var + 0.001 * m_var + tie_break_expr)
 
         global SOLVER_CALL_COUNT
         SOLVER_CALL_COUNT += 1
@@ -266,6 +300,7 @@ class ORToolsMILPScheduler(BaseScheduler):
                 elapsed_ms=elapsed_ms,
                 reason="CAPACITY_CAPS_EXCEEDED",
                 record_in_flight=record_in_flight,
+                tie_break_costs=tie_break_costs,
             )
 
         assignments: dict[str, str] = {}

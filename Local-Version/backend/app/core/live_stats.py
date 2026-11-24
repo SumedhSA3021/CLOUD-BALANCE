@@ -36,6 +36,16 @@ class LiveDispatchTracker:
             self._buckets[sec][worker_id] += 1
             self._current_test_totals[worker_id] += 1
 
+    def get_worker_cumulative(self, worker_id: str) -> int:
+        """Get cumulative task dispatches for a specific worker in the current test."""
+        with self._lock:
+            return self._current_test_totals.get(worker_id, 0)
+
+    def get_current_test_totals(self) -> dict[str, int]:
+        """Return snapshot of cumulative dispatches per worker in current test."""
+        with self._lock:
+            return dict(self._current_test_totals)
+
     def reset_current_test(self) -> None:
         """Reset the counters and sliding window when a new test starts."""
         with self._lock:

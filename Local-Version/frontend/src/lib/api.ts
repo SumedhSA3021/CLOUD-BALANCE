@@ -166,6 +166,10 @@ export interface TestStatusResponse {
   seed?: number | null;
   lambda_per_client?: number | null;
   heavy_ratio?: number | null;
+  load_source?: string | null;
+  sent?: number | null;
+  ok?: number | null;
+  failed?: number | null;
 }
 
 export interface TestSummaryRow {
@@ -210,6 +214,7 @@ export async function startAdminTest(
     lambda_per_client: number;
     heavy_ratio: number;
     seed: number;
+    load_source?: string;
   }
 ): Promise<TestStatusResponse> {
   return requestJson<TestStatusResponse>("/admin/test/start", {

@@ -397,6 +397,85 @@ export const BenchmarkSection: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Seeded Replay Metric Comparison Table */}
+          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 overflow-x-auto shadow-lg">
+            <h3 className="text-xs font-semibold text-white mb-3">
+              Run <code className="text-cyan-300">{activeRun.run_id ?? "bench-seeded"}</code> — Detailed Metric Comparison ({activeRun.total_tasks} Seeded Tasks)
+            </h3>
+            <table className="w-full text-left border-collapse text-xs font-mono">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 uppercase text-[11px] bg-slate-950/60">
+                  <th className="py-2.5 px-3">Scheduler</th>
+                  <th className="py-2.5 px-3">Mean CPU StdDev</th>
+                  <th className="py-2.5 px-3">Peak CPU %</th>
+                  <th className="py-2.5 px-3">Peak RAM %</th>
+                  <th className="py-2.5 px-3">Cap Violations</th>
+                  <th className="py-2.5 px-3">Mean Latency</th>
+                  <th className="py-2.5 px-3">P95 Latency</th>
+                  <th className="py-2.5 px-3">Solver Time</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70">
+                {schedOrder.map((key) => {
+                  const m = activeRun.results[key];
+                  if (!m) return null;
+                  const isMilp = key === "ortools_milp";
+                  return (
+                    <tr
+                      key={key}
+                      className={
+                        isMilp
+                          ? "bg-cyan-500/10 text-white font-semibold border-l-2 border-cyan-400"
+                          : "text-slate-300"
+                      }
+                    >
+                      <td className="py-3 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs ${
+                            isMilp
+                              ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold"
+                              : "bg-slate-800 text-amber-300 border border-slate-700"
+                          }`}
+                        >
+                          {key}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={isMilp ? "text-cyan-300 font-bold" : ""}>
+                          {m.cpu_stddev_mean.toFixed(2)}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">{m.peak_cpu_pct.toFixed(1)}%</td>
+                      <td className="py-3 px-3">{m.peak_mem_pct.toFixed(1)}%</td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded font-bold ${
+                            m.total_cap_violations === 0
+                              ? "bg-emerald-500/20 text-emerald-300"
+                              : "bg-rose-500/20 text-rose-300"
+                          }`}
+                        >
+                          {m.total_cap_violations}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={isMilp ? "text-emerald-300 font-bold" : ""}>
+                          {m.mean_completion_latency_ms.toFixed(1)} ms
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={isMilp ? "text-cyan-300 font-bold" : ""}>
+                          {m.p95_completion_latency_ms.toFixed(1)} ms
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">{m.mean_solver_latency_ms.toFixed(3)} ms</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </>
       ) : null}
 

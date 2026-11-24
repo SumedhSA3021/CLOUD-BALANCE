@@ -70,9 +70,10 @@ export const OpsCenterPage: React.FC = () => {
   // Row 2: Compact Test Controls State
   const [mode, setMode] = useState<string>("milp");
   const [durationSec, setDurationSec] = useState<number>(30);
-  const [lambdaPerClient, setLambdaPerClient] = useState<number>(5.0);
+  const [lambdaPerClient, setLambdaPerClient] = useState<number>(2.0);
   const [heavyRatio, setHeavyRatio] = useState<number>(0.2);
   const [seed, setSeed] = useState<number>(42);
+  const [loadSource, setLoadSource] = useState<"simulator" | "external">("simulator");
 
   // Live Test State
   const [testStatus, setTestStatus] = useState<TestStatusResponse>({ state: "idle" });
@@ -86,7 +87,7 @@ export const OpsCenterPage: React.FC = () => {
   // WebSocket Live Snapshot for worker CPU, RAM, and in-flight tasks
   const { snapshot } = useWebSocket();
 
-  // Polling loop (every 1.5 seconds)
+  // Polling loop (every 1.0 second)
   const pollAll = useCallback(async () => {
     try {
       const statusData = await fetchTestStatus();
@@ -107,7 +108,7 @@ export const OpsCenterPage: React.FC = () => {
 
   useEffect(() => {
     pollAll();
-    const interval = setInterval(pollAll, 1500);
+    const interval = setInterval(pollAll, 1000);
     return () => clearInterval(interval);
   }, [pollAll]);
 
@@ -163,8 +164,10 @@ export const OpsCenterPage: React.FC = () => {
         lambda_per_client: Number(lambdaPerClient),
         heavy_ratio: Number(heavyRatio),
         seed: Number(seed),
+        load_source: loadSource,
       });
       setTestStatus(res);
+      setLiveStats(null);
       setActionMessage(`Test armed! Test ID: ${res.test_id || "armed"}`);
     } catch (err) {
       setActionMessage(`Start Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -212,13 +215,15 @@ export const OpsCenterPage: React.FC = () => {
   // Worker telemetry getter
   const getWorkerTelemetry = (workerId: string) => {
     const w = snapshot?.workers.find((worker) => worker.worker_id === workerId);
-    const cpu = w ? w.cpu_percent : 12.0;
-    const ram = w ? w.memory_percent : 20.0;
+    const isOnline = Boolean(w);
+    const cpu = w ? w.cpu_percent : 0.0;
+    const ram = w ? w.memory_percent : 0.0;
     const inFlight = w ? w.active_tasks : 0;
     const queueLength = w ? (w.queue_length ?? (inFlight > 2 ? inFlight - 2 : 0)) : 0;
-    const isOverloaded = cpu >= 85.0 || ram >= 90.0 || queueLength >= 4;
+    const isOverloaded = isOnline && (cpu >= 85.0 || ram >= 90.0 || queueLength >= 4);
 
     return {
+      isOnline,
       cpu,
       ram,
       inFlight,
@@ -232,6 +237,7 @@ export const OpsCenterPage: React.FC = () => {
   const w1Data = liveStats?.series?.["worker-1"] ?? Array(60).fill(0);
   const w2Data = liveStats?.series?.["worker-2"] ?? Array(60).fill(0);
   const w3Data = liveStats?.series?.["worker-3"] ?? Array(60).fill(0);
+  const maxDispatchedPerSec = Math.max(1, ...w1Data, ...w2Data, ...w3Data);
 
   const lineChartData = {
     labels: chartLabels,
@@ -365,7 +371,7 @@ export const OpsCenterPage: React.FC = () => {
         {/* Row 2: Test Controls (Full width and compact) */}
         <section aria-label="Test Controls" className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold">
                 Test Controls
               </h2>
@@ -378,6 +384,25 @@ export const OpsCenterPage: React.FC = () => {
                   <Unlock className="w-3 h-3" /> Ready
                 </span>
               )}
+
+              {/* Live Test Counters */}
+              <div className="flex items-center gap-1.5 text-[11px] font-mono ml-2">
+                <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300">
+                  Sent: <strong className="text-white">{testStatus.sent ?? 0}</strong>
+                </span>
+                <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40 text-emerald-400">
+                  OK: <strong className="text-emerald-300">{testStatus.ok ?? 0}</strong>
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded border ${
+                    Number(testStatus.failed ?? 0) > 0
+                      ? "bg-rose-950/60 border-rose-800/60 text-rose-300 font-bold"
+                      : "bg-slate-950 border-slate-800 text-slate-400"
+                  }`}
+                >
+                  Failed: <strong>{testStatus.failed ?? 0}</strong>
+                </span>
+              </div>
             </div>
 
             {/* Countdown / State indicator */}
@@ -397,6 +422,54 @@ export const OpsCenterPage: React.FC = () => {
               </span>
             )}
           </div>
+
+          {/* Load Source Selector Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono uppercase text-slate-400">Load Source:</span>
+              <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  disabled={isLocked}
+                  onClick={() => setLoadSource("simulator")}
+                  className={`px-2.5 py-1 rounded text-xs font-mono transition ${
+                    loadSource === "simulator"
+                      ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                  } disabled:opacity-50`}
+                >
+                  Built-in simulator (sim-1..3)
+                </button>
+                <button
+                  type="button"
+                  disabled={isLocked}
+                  onClick={() => setLoadSource("external")}
+                  className={`px-2.5 py-1 rounded text-xs font-mono transition ${
+                    loadSource === "external"
+                      ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                  } disabled:opacity-50`}
+                >
+                  External laptops (tools/load_client.py)
+                </button>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono text-slate-500">
+              {loadSource === "simulator"
+                ? "Autonomous async client loops dispatching through controller"
+                : "Awaiting incoming task traffic from remote test laptops"}
+            </span>
+          </div>
+
+          {/* Overload Warning Banner if lambda * 3 > 8.0 */}
+          {lambdaPerClient * 3 > 8.0 && (
+            <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>
+                <strong>High Rate Warning:</strong> {lambdaPerClient} req/s/client across 3 clients ({(lambdaPerClient * 3).toFixed(1)} req/s total) may saturate local e2-micro / single-machine workers. Default is 2.0 req/s/client.
+              </span>
+            </div>
+          )}
 
           {/* Compact Input Controls Row */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 items-end">
@@ -550,9 +623,19 @@ export const OpsCenterPage: React.FC = () => {
               Live Cluster Panel
             </h2>
             <span className="text-[11px] font-mono text-slate-500">
-              Telemetry Polled every 1.5s
+              Telemetry Polled every 1.0s
             </span>
           </div>
+
+          {/* Offline Workers Warning */}
+          {(!snapshot?.workers || snapshot.workers.length === 0) && (
+            <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                <strong>Worker Nodes Offline:</strong> Backend worker processes (ports 8001, 8002, 8003) are not currently running. Tasks dispatched during tests will fail until worker processes are started.
+              </span>
+            </div>
+          )}
 
           {/* Three Worker Cards Side by Side (Stacked on phone) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -573,6 +656,11 @@ export const OpsCenterPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      {!tel.isOnline && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold">
+                          OFFLINE
+                        </span>
+                      )}
                       {tel.isOverloaded && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" /> OVERLOADED
@@ -651,7 +739,8 @@ export const OpsCenterPage: React.FC = () => {
                       scales: {
                         y: {
                           beginAtZero: true,
-                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 } },
+                          suggestedMax: Math.max(2, maxDispatchedPerSec + 1),
+                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 }, stepSize: 1 },
                           grid: { color: "rgba(51, 65, 85, 0.3)" },
                         },
                         x: {
@@ -691,7 +780,8 @@ export const OpsCenterPage: React.FC = () => {
                       scales: {
                         y: {
                           beginAtZero: true,
-                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 } },
+                          suggestedMax: Math.max(2, maxDispatchedPerSec + 1),
+                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 }, stepSize: 1 },
                           grid: { color: "rgba(51, 65, 85, 0.3)" },
                         },
                         x: {

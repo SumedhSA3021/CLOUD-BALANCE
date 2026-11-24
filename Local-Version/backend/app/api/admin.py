@@ -31,6 +31,7 @@ from app.core.logger import (
     write_test_summary,
 )
 from app.core.logging import get_logger
+from app.core.simulator import simulator_manager
 from app.schedulers.test_hooks import (
     ModeLockedError,
     end_test,
@@ -59,9 +60,10 @@ class StartTestRequest(BaseModel):
 
     mode: str = Field(..., description="'round_robin' or 'milp'")
     duration_s: float = Field(default=30.0, gt=0.0)
-    lambda_per_client: float = Field(default=5.0, gt=0.0)
+    lambda_per_client: float = Field(default=2.0, gt=0.0)
     heavy_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
     seed: int = Field(default=42)
+    load_source: str = Field(default="simulator", description="'simulator' or 'external'")
 
 
 class TestStatusResponse(BaseModel):
@@ -77,6 +79,10 @@ class TestStatusResponse(BaseModel):
     seed: int | None = None
     lambda_per_client: float | None = None
     heavy_ratio: float | None = None
+    load_source: str | None = None
+    sent: int | None = 0
+    ok: int | None = 0
+    failed: int | None = 0
 
 
 class ActiveTestManager:
@@ -91,8 +97,19 @@ class ActiveTestManager:
         self.seed: int | None = None
         self.lambda_per_client: float | None = None
         self.heavy_ratio: float | None = None
+        self.load_source: str = "simulator"
+        self.counters: dict[str, int] = {"sent": 0, "ok": 0, "failed": 0}
         self._lifecycle_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+
+    def record_task_result(self, status_code: str) -> None:
+        """Record dispatched task outcome for active test counters."""
+        self.counters["sent"] += 1
+        st = str(status_code).lower()
+        if st == "ok":
+            self.counters["ok"] += 1
+        else:
+            self.counters["failed"] += 1
 
     def get_status(self) -> dict[str, Any]:
         return {
@@ -104,6 +121,10 @@ class ActiveTestManager:
             "seed": self.seed,
             "lambda_per_client": self.lambda_per_client,
             "heavy_ratio": self.heavy_ratio,
+            "load_source": self.load_source,
+            "sent": self.counters["sent"],
+            "ok": self.counters["ok"],
+            "failed": self.counters["failed"],
         }
 
     async def start(
@@ -124,6 +145,8 @@ class ActiveTestManager:
             self.lambda_per_client = float(req.lambda_per_client)
             self.heavy_ratio = float(req.heavy_ratio)
             self.seed = int(req.seed)
+            self.load_source = (req.load_source or "simulator").lower().strip()
+            self.counters = {"sent": 0, "ok": 0, "failed": 0}
             self.start_at = round(time.time() + 5.0, 3)
             self.state = TestState.ARMED
 
@@ -141,6 +164,7 @@ class ActiveTestManager:
                     "lambda_per_client": self.lambda_per_client,
                     "heavy_ratio": self.heavy_ratio,
                     "seed": self.seed,
+                    "load_source": self.load_source,
                 },
             )
 
@@ -152,6 +176,9 @@ class ActiveTestManager:
         async with self._lock:
             if self.state == TestState.IDLE:
                 return self.get_status()
+
+            # Cancel internal simulator if running
+            await simulator_manager.stop()
 
             if self._lifecycle_task and not self._lifecycle_task.done():
                 self._lifecycle_task.cancel()
@@ -169,9 +196,27 @@ class ActiveTestManager:
 
             # 2. Running
             self.state = TestState.RUNNING
-            logger.info("test_lifecycle_running", test_id=self.test_id, mode=self.mode)
+            logger.info("test_lifecycle_running", test_id=self.test_id, mode=self.mode, load_source=self.load_source)
             dur = self.duration_s or 30.0
+
+            if self.load_source == "simulator":
+                # Start built-in simulator
+                await simulator_manager.start(
+                    app=app_state,
+                    duration_s=dur,
+                    lambda_per_client=self.lambda_per_client or 2.0,
+                    heavy_ratio=self.heavy_ratio or 0.2,
+                    seed=self.seed or 42,
+                    start_at=self.start_at or time.time(),
+                    num_clients=3,
+                    on_result=self.record_task_result,
+                )
+
             await asyncio.sleep(dur)
+
+            # Stop built-in simulator when duration expires
+            if self.load_source == "simulator":
+                await simulator_manager.stop()
 
             # 3. Draining: wait up to 15s for in-flight tasks
             self.state = TestState.DRAINING
@@ -191,6 +236,7 @@ class ActiveTestManager:
         except asyncio.CancelledError:
             pass
         finally:
+            await simulator_manager.stop()
             self._finalize()
 
     def _finalize(self) -> None:

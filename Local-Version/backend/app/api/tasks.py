@@ -268,6 +268,11 @@ async def execute_task_contract(
         status=worker_status,
     )
 
+    if test_id != "none" and not str(req.client_id).startswith("sim-"):
+        from app.api.admin import test_manager
+
+        test_manager.record_task_result(worker_status)
+
     return TaskContractResponse(
         result=result,
         assigned_worker=assigned_worker,

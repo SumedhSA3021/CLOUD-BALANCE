@@ -11,7 +11,7 @@ export const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<PublicTasksPage />} />
         <Route path="/ops" element={<OpsCenterPage />} />
-        <Route path="/benchmark" element={<DashboardPage initialTab="benchmark" />} />
+        <Route path="/benchmark" element={<DashboardPage />} />
         <Route path="/client" element={<ClientPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

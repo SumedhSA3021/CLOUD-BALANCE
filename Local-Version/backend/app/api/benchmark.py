@@ -214,7 +214,16 @@ async def list_benchmark_runs(
         default_run = run_seeded_benchmark_simulation(seed=42)
         await history.record_benchmark_run(default_run)
         runs = [default_run]
-    return runs
+
+    sanitized_runs: list[BenchmarkRun] = []
+    for r in runs:
+        filtered_results = {
+            k: v for k, v in r.results.items() if k in ("ortools_milp", "round_robin")
+        }
+        if "least_connections" in r.results or len(filtered_results) != len(r.results):
+            r = r.model_copy(update={"results": filtered_results})
+        sanitized_runs.append(r)
+    return sanitized_runs
 
 
 @router.post("/run", response_model=BenchmarkRun)

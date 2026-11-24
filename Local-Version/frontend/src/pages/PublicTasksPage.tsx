@@ -330,8 +330,14 @@ export const PublicTasksPage: React.FC = () => {
                       <span className="text-emerald-400">{cgpaResult.total_ms.toFixed(1)} ms</span>
                     </span>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                    200 OK
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-mono ${
+                      cgpaResult.result?.status === "unavailable"
+                        ? "bg-amber-500/10 text-amber-300 border border-amber-500/30"
+                        : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                    }`}
+                  >
+                    {cgpaResult.result?.status === "unavailable" ? "Worker Offline" : "200 OK"}
                   </span>
                 </div>
 
@@ -490,8 +496,14 @@ export const PublicTasksPage: React.FC = () => {
                       <span className="text-emerald-400">{hashResult.total_ms.toFixed(1)} ms</span>
                     </span>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                    200 OK
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-mono ${
+                      hashResult.result?.status === "unavailable"
+                        ? "bg-amber-500/10 text-amber-300 border border-amber-500/30"
+                        : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                    }`}
+                  >
+                    {hashResult.result?.status === "unavailable" ? "Worker Offline" : "200 OK"}
                   </span>
                 </div>
 
