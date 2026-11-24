@@ -23,11 +23,6 @@ const SCHEDULER_OPTIONS: { id: SchedulerName; label: string; desc: string }[] = 
     label: "Round Robin",
     desc: "Cyclic Pointer (Load-Blind)",
   },
-  {
-    id: "least_connections",
-    label: "Least Connections",
-    desc: "Min Active Tasks",
-  },
 ];
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({

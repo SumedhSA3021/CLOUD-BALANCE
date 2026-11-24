@@ -17,7 +17,6 @@ from app.models.schemas import (
     Telemetry,
 )
 from app.schedulers.base import BaseScheduler, InFlightTracker
-from app.schedulers.least_connections import LeastConnectionsScheduler
 from app.schedulers.ortools_milp import ORToolsMILPScheduler
 from app.schedulers.round_robin import RoundRobinScheduler
 from app.services.history import HistoryService
@@ -30,7 +29,7 @@ def run_seeded_benchmark_simulation(
     num_batches: int = 18,
     batch_size: int = 4,
 ) -> BenchmarkRun:
-    """Replay an identical seeded multi-client task trace across all 3 schedulers.
+    """Replay an identical seeded multi-client task trace across OR-Tools MILP and Round Robin.
 
     Evaluates:
       - CPU std-dev across workers over time
@@ -64,7 +63,6 @@ def run_seeded_benchmark_simulation(
     scheduler_instances: list[tuple[str, BaseScheduler]] = [
         ("ortools_milp", ORToolsMILPScheduler(in_flight_tracker=InFlightTracker())),
         ("round_robin", RoundRobinScheduler(in_flight_tracker=InFlightTracker())),
-        ("least_connections", LeastConnectionsScheduler(in_flight_tracker=InFlightTracker())),
     ]
 
     for sched_name, scheduler in scheduler_instances:
@@ -186,7 +184,7 @@ def run_seeded_benchmark_simulation(
         ),
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for s_name in ("ortools_milp", "least_connections", "round_robin"):
+    for s_name in ("ortools_milp", "round_robin"):
         m = results[s_name]
         lines.append(
             f"| `{s_name}` | {m.cpu_stddev_mean:.2f} | {m.peak_cpu_pct:.1f} | "
@@ -226,7 +224,7 @@ async def trigger_benchmark_run(
     num_batches: int = Query(default=18, ge=4, le=100),
     _api_key: str = Depends(verify_api_key),
 ) -> BenchmarkRun:
-    """Trigger a new seeded 3-scheduler comparison benchmark and persist the result."""
+    """Trigger a new seeded 2-scheduler comparison benchmark (OR-Tools MILP vs Round Robin) and persist the result."""
     history: HistoryService = request.app.state.history
     run = run_seeded_benchmark_simulation(seed=seed, num_batches=num_batches)
     await history.record_benchmark_run(run)

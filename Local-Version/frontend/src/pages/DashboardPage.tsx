@@ -169,32 +169,6 @@ export const DashboardPage: React.FC<{ initialTab?: "ops" | "benchmark" }> = ({
                 </div>
               )}
 
-              {activeScheduler === "least_connections" && (
-                <div
-                  data-testid="lc-priority-flow"
-                  className="mb-3.5 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs font-mono"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-                      </span>
-                      Least Connections Routing:
-                    </span>
-                    <span className="text-slate-300">
-                      Dispatches to worker with fewest active tasks (Tie-break: w1 ➔ w2 ➔ w3)
-                    </span>
-                  </div>
-                  <span className="text-emerald-200 text-[11px]">
-                    Selected Node:{" "}
-                    <strong className="text-white underline font-bold">
-                      {latestAssignment?.assigned_worker_id ?? "worker-1"}
-                    </strong>
-                  </span>
-                </div>
-              )}
-
               {workers.length === 0 ? (
                 <div className="rounded-xl bg-slate-900/90 border border-dashed border-slate-800 p-8 text-center text-xs text-slate-400">
                   No active worker VMs reporting in Redis (`cluster:worker:*`). Click{" "}

@@ -23,7 +23,6 @@ interface HeaderProps {
 const SCHEDULER_LABELS: Record<string, string> = {
   ortools_milp: "OR-Tools MILP",
   round_robin: "Round Robin",
-  least_connections: "Least Connections",
 };
 
 export const Header: React.FC<HeaderProps> = ({
