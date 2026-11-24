@@ -26,6 +26,12 @@ class InMemoryTTLStore:
         for k in expired:
             self._data.pop(k, None)
 
+    async def set(self, name: str, value: str) -> bool:
+        """Set key `name` to hold string `value` indefinitely."""
+        async with self._lock:
+            self._data[name] = (str(value), float("inf"))
+        return True
+
     async def setex(self, name: str, time_sec: int, value: str) -> bool:
         """Set key `name` to hold string `value` and expire after `time_sec` seconds."""
         expires_at = time.monotonic() + float(time_sec)
@@ -97,6 +103,21 @@ class InMemoryTTLStore:
                     new_val = int(entry[0]) + 1
                 except ValueError:
                     new_val = 1
+            self._data[name] = (str(new_val), float("inf"))
+            return new_val
+
+    async def decr(self, name: str) -> int:
+        """Atomically decrement integer value of key `name` by 1."""
+        now = time.monotonic()
+        async with self._lock:
+            entry = self._data.get(name)
+            if entry is None or entry[1] <= now:
+                new_val = 0
+            else:
+                try:
+                    new_val = max(0, int(entry[0]) - 1)
+                except ValueError:
+                    new_val = 0
             self._data[name] = (str(new_val), float("inf"))
             return new_val
 
@@ -220,6 +241,17 @@ class DualRedisClient:
                 pass
         await self._memory_store.flushdb()
 
+    async def set(self, name: str, value: str) -> bool:
+        """Set key value indefinitely."""
+        if not self._using_memory and self._redis is not None:
+            try:
+                res = await self._redis.set(name, str(value))
+                return bool(res)
+            except Exception as exc:
+                logger.warning("redis_set_error_falling_back", error=str(exc))
+                self._using_memory = True
+        return await self._memory_store.set(name, str(value))
+
     async def incr(self, name: str) -> int:
         """Atomically increment key `name` by 1."""
         if not self._using_memory and self._redis is not None:
@@ -230,6 +262,17 @@ class DualRedisClient:
                 logger.warning("redis_incr_error_falling_back", error=str(exc))
                 self._using_memory = True
         return await self._memory_store.incr(name)
+
+    async def decr(self, name: str) -> int:
+        """Atomically decrement key `name` by 1."""
+        if not self._using_memory and self._redis is not None:
+            try:
+                res = await self._redis.decr(name)
+                return int(res)
+            except Exception as exc:
+                logger.warning("redis_decr_error_falling_back", error=str(exc))
+                self._using_memory = True
+        return await self._memory_store.decr(name)
 
     async def close(self) -> None:
         """Close underlying connections."""

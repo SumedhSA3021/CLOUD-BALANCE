@@ -12,8 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import benchmark, control, health, tasks, telemetry, websocket
+from app.api import admin, benchmark, control, health, tasks, telemetry, websocket
 from app.core.config import Settings, get_settings
+from app.core.logger import csv_logger
 from app.core.logging import configure_logging, set_correlation_id
 from app.core.mongo_client import DualMongoClient
 from app.core.redis_client import DualRedisClient
@@ -93,6 +94,7 @@ def create_app(
         try:
             yield
         finally:
+            csv_logger.close()
             await broadcaster.stop()
             await batcher.stop()
             await redis_client.close()
@@ -139,9 +141,12 @@ def create_app(
     application.include_router(health.router)
     application.include_router(telemetry.router)
     application.include_router(tasks.router)
+    application.include_router(tasks.public_tasks_router)
     application.include_router(control.router)
     application.include_router(benchmark.router)
     application.include_router(websocket.router)
+    application.include_router(admin.admin_router)
+    application.include_router(admin.public_test_router)
 
     @application.get("/api/v1/mongo", tags=["persistence"])
     async def get_mongo_data(request: Request) -> dict[str, Any]:

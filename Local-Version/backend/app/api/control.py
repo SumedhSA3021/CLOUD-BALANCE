@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.security import verify_api_key
 from app.models.schemas import (
@@ -15,6 +15,7 @@ from app.models.schemas import (
     TrafficControlRequest,
 )
 from app.schedulers.ortools_milp import get_solver_call_count, reset_solver_call_count
+from app.schedulers.test_hooks import is_test_running
 from app.services.batcher import MicroBatcherService
 from app.services.broadcaster import WebSocketBroadcaster
 from app.services.cluster_state import ClusterStateService
@@ -29,6 +30,11 @@ async def switch_scheduler(
     _api_key: str = Depends(verify_api_key),
 ) -> dict[str, Any]:
     """Hot-swap the active scheduling algorithm at runtime (`ortools_milp`, `round_robin`, `least_connections`)."""
+    if is_test_running():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot change scheduling mode while an automated test is running (mode is locked).",
+        )
     batcher: MicroBatcherService = request.app.state.batcher
     broadcaster: WebSocketBroadcaster = request.app.state.broadcaster
     active = batcher.set_scheduler(payload.scheduler)
