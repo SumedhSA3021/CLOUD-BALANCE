@@ -1,11 +1,13 @@
-"""FastAPI Worker Executor (:8001) running real NumPy matrix workloads."""
+"""FastAPI Worker Executor (:8001) executing CGPA, heavy hashing, and compute workloads."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -13,34 +15,46 @@ from typing import Any
 
 import httpx
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+
+# Maximum allowed payload size: 64 KB default
+MAX_PAYLOAD_BYTES = int(os.getenv("MAX_PAYLOAD_BYTES", str(64 * 1024)))
+
+# Default iterations for heavy hashing loop: tuned for 0.5 - 1.0s on e2-micro
+DEFAULT_HEAVY_ITERATIONS = int(os.getenv("HEAVY_TASK_ITERATIONS", "180000"))
 
 
 class ExecuteTaskRequest(BaseModel):
-    """Inbound payload dispatched from Controller to POST /execute."""
+    """Inbound payload dispatched to Worker POST /execute."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
-    task_id: str
-    duration_sec: float = Field(..., gt=0.0, le=60.0)
-    matrix_dim: int = Field(..., ge=10, le=10000)
+    task_id: str = Field(default_factory=lambda: f"tsk-{uuid.uuid4().hex[:10]}")
+    task_type: str = Field(default="legacy", description="'light', 'heavy', or legacy matrix workloads")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Task specific parameters")
+
+    # Backward compatibility fields for controller cluster
+    duration_sec: float = Field(default=0.1, gt=0.0, le=60.0)
+    matrix_dim: int = Field(default=100, ge=10, le=10000)
     cpu_demand_pct: float = Field(default=25.0, ge=0.0, le=100.0)
     mem_demand_mb: float = Field(default=256.0, ge=0.0)
 
 
 class ExecuteTaskResponse(BaseModel):
-    """Response returned to Controller upon completing np.dot execution."""
+    """Response returned upon completing worker task execution."""
 
     model_config = ConfigDict(frozen=True)
 
     task_id: str
     worker_id: str
+    task_type: str = "legacy"
     status: str = "COMPLETED"
     execution_ms: float
-    matrix_dim: int
-    checksum: float
-    active_task_count: int
+    result: dict[str, Any] = Field(default_factory=dict)
+    active_task_count: int = 0
+    matrix_dim: int = 0
+    checksum: float = 0.0
 
 
 @dataclass
@@ -69,6 +83,110 @@ class WorkerRuntimeState:
     active_cpu_demand_pct: float = 0.0
     active_mem_demand_mb: float = 0.0
     total_completed: int = 0
+
+
+def _calculate_cgpa(payload: dict[str, Any]) -> dict[str, Any]:
+    """Calculate CGPA from request payload courses or grades (task_type == 'light')."""
+    courses = payload.get("courses")
+    grades = payload.get("grades")
+    credits_list = payload.get("credits")
+
+    if not courses and not grades:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload must contain 'courses' or 'grades' list for light CGPA task",
+        )
+
+    total_weighted_points = 0.0
+    total_credits = 0.0
+    course_count = 0
+
+    if courses:
+        if not isinstance(courses, list):
+            raise HTTPException(status_code=400, detail="'courses' must be a list")
+        if len(courses) > 500:
+            raise HTTPException(status_code=400, detail="Too many courses (max 500)")
+        for item in courses:
+            if not isinstance(item, dict):
+                raise HTTPException(status_code=400, detail="Course items must be dictionaries")
+            grade = item.get("grade", item.get("grade_point", item.get("gpa")))
+            cr = item.get("credits", item.get("credit", 1.0))
+            if grade is None:
+                raise HTTPException(status_code=400, detail="Course missing 'grade'")
+            try:
+                g_val = float(grade)
+                c_val = float(cr)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Grade and credits must be numeric")
+            if not (0.0 <= g_val <= 10.0):
+                raise HTTPException(status_code=400, detail=f"Grade {g_val} must be between 0.0 and 10.0")
+            if c_val <= 0.0:
+                raise HTTPException(status_code=400, detail="Credits must be positive")
+            total_weighted_points += g_val * c_val
+            total_credits += c_val
+            course_count += 1
+    elif grades:
+        if not isinstance(grades, list):
+            raise HTTPException(status_code=400, detail="'grades' must be a list")
+        if len(grades) > 500:
+            raise HTTPException(status_code=400, detail="Too many grades (max 500)")
+        cr_arr = (
+            credits_list
+            if (credits_list and isinstance(credits_list, list) and len(credits_list) == len(grades))
+            else [1.0] * len(grades)
+        )
+        for g, c in zip(grades, cr_arr):
+            try:
+                g_val = float(g)
+                c_val = float(c)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Grade and credits must be numeric")
+            if not (0.0 <= g_val <= 10.0):
+                raise HTTPException(status_code=400, detail=f"Grade {g_val} must be between 0.0 and 10.0")
+            if c_val <= 0.0:
+                raise HTTPException(status_code=400, detail="Credits must be positive")
+            total_weighted_points += g_val * c_val
+            total_credits += c_val
+            course_count += 1
+
+    if total_credits <= 0.0:
+        raise HTTPException(status_code=400, detail="Total credits must be greater than zero")
+
+    cgpa = total_weighted_points / total_credits
+    return {
+        "cgpa": round(cgpa, 2),
+        "total_credits": round(total_credits, 2),
+        "course_count": course_count,
+        "scale": 10.0,
+    }
+
+
+def _run_heavy_hashing_loop(payload: dict[str, Any], default_iterations: int) -> dict[str, Any]:
+    """Perform iterative SHA-256 hashing loop tuned for 0.5-1.0s on e2-micro."""
+    raw_data = str(payload.get("data", "cloudbalance-workload-seed-string"))
+    requested_iter = payload.get("iterations")
+    if requested_iter is not None:
+        try:
+            iterations = int(requested_iter)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Iterations must be an integer")
+        if iterations <= 0:
+            raise HTTPException(status_code=400, detail="Iterations must be positive")
+        if iterations > 3_000_000:
+            raise HTTPException(status_code=400, detail="Iterations exceeds safe limit (max 3,000,000)")
+    else:
+        iterations = default_iterations
+
+    current_hash = hashlib.sha256(raw_data.encode("utf-8")).digest()
+    for _ in range(iterations):
+        current_hash = hashlib.sha256(current_hash).digest()
+
+    return {
+        "final_hash": current_hash.hex(),
+        "iterations": iterations,
+        "algorithm": "sha256",
+        "input_preview": raw_data[:32],
+    }
 
 
 def _run_numpy_dot_kernel(
@@ -180,24 +298,59 @@ def create_worker_app(state: WorkerRuntimeState | None = None) -> FastAPI:
         }
 
     @app.post("/execute", response_model=ExecuteTaskResponse)
-    async def execute_workload(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
+    async def execute_workload(req: ExecuteTaskRequest, request: Request) -> ExecuteTaskResponse:
+        # 3. Reject payload sizes above a safe limit with a clear 4xx error.
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_PAYLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Payload size ({content_length} bytes) exceeds maximum safe limit of {MAX_PAYLOAD_BYTES} bytes",
+            )
+        if len(str(req.payload)) > MAX_PAYLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Payload size exceeds maximum safe limit of {MAX_PAYLOAD_BYTES} bytes",
+            )
+
         start_ns = time.perf_counter_ns()
         runtime.active_task_count += 1
         runtime.active_cpu_demand_pct += req.cpu_demand_pct
         runtime.active_mem_demand_mb += req.mem_demand_mb
         await _push_live_telemetry()
 
-        try:
-            physical_dim = max(16, min(req.matrix_dim, runtime.max_physical_dim))
-            effective_duration = max(0.01, req.duration_sec * runtime.time_scale)
-            seed = abs(hash(req.task_id)) % (2**31 - 1)
+        task_type = (req.task_type or "legacy").lower()
+        checksum = 0.0
+        result: dict[str, Any] = {}
 
-            checksum = await asyncio.to_thread(
-                _run_numpy_dot_kernel,
-                physical_dim,
-                effective_duration,
-                seed,
-            )
+        try:
+            # 1. task_type "light": CGPA calculation
+            if task_type in ("light", "cgpa"):
+                result = _calculate_cgpa(req.payload)
+                checksum = float(result.get("cgpa", 0.0))
+
+            # 2. task_type "heavy": hashing loop with configurable iterations
+            elif task_type in ("heavy", "hash", "hashing"):
+                result = await asyncio.to_thread(
+                    _run_heavy_hashing_loop,
+                    req.payload,
+                    DEFAULT_HEAVY_ITERATIONS,
+                )
+                checksum = float(int(result["final_hash"][:8], 16))
+
+            # Legacy compute workload (np.dot)
+            else:
+                physical_dim = max(16, min(req.matrix_dim, runtime.max_physical_dim))
+                effective_duration = max(0.01, req.duration_sec * runtime.time_scale)
+                seed = abs(hash(req.task_id)) % (2**31 - 1)
+
+                checksum = await asyncio.to_thread(
+                    _run_numpy_dot_kernel,
+                    physical_dim,
+                    effective_duration,
+                    seed,
+                )
+                result = {"matrix_dim": req.matrix_dim, "checksum": checksum}
+
             runtime.total_completed += 1
         finally:
             runtime.active_task_count = max(0, runtime.active_task_count - 1)
@@ -209,12 +362,15 @@ def create_worker_app(state: WorkerRuntimeState | None = None) -> FastAPI:
             )
             await _push_live_telemetry()
 
+        # 4. Return result plus exec_ms measured inside the worker.
         elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
         return ExecuteTaskResponse(
             task_id=req.task_id,
             worker_id=runtime.worker_id,
+            task_type=task_type,
             status="COMPLETED",
             execution_ms=round(elapsed_ms, 2),
+            result=result,
             matrix_dim=req.matrix_dim,
             checksum=checksum,
             active_task_count=runtime.active_task_count,
