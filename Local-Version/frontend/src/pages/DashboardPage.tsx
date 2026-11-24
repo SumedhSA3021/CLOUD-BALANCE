@@ -98,20 +98,20 @@ export const DashboardPage: React.FC<{ initialTab?: "ops" | "benchmark" }> = ({
           </div>
         )}
 
-        <ControlPanel
-          activeScheduler={snapshot?.active_scheduler ?? "ortools_milp"}
-          lambdaTotal={snapshot?.lambda_total ?? 12}
-          paused={snapshot?.paused ?? false}
-          onSelectScheduler={handleSelectScheduler}
-          onChangeLambda={handleChangeLambda}
-          onTogglePause={handleTogglePause}
-          onReviveAllWorkers={handleReviveAllWorkers}
-        />
-
         {activeTab === "benchmark" ? (
           <BenchmarkSection />
         ) : (
           <>
+            <ControlPanel
+              activeScheduler={snapshot?.active_scheduler ?? "ortools_milp"}
+              lambdaTotal={snapshot?.lambda_total ?? 12}
+              paused={snapshot?.paused ?? false}
+              onSelectScheduler={handleSelectScheduler}
+              onChangeLambda={handleChangeLambda}
+              onTogglePause={handleTogglePause}
+              onReviveAllWorkers={handleReviveAllWorkers}
+            />
+
             {/* Worker VMs Grid */}
             <section aria-label="Internal Worker VMs">
               <div className="flex items-center justify-between mb-2.5">
