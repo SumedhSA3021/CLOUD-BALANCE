@@ -73,7 +73,6 @@ export const OpsCenterPage: React.FC = () => {
   const [lambdaPerClient, setLambdaPerClient] = useState<number>(2.0);
   const [heavyRatio, setHeavyRatio] = useState<number>(0.2);
   const [seed, setSeed] = useState<number>(42);
-  const [loadSource, setLoadSource] = useState<"simulator" | "external">("simulator");
 
   // Live Test State
   const [testStatus, setTestStatus] = useState<TestStatusResponse>({ state: "idle" });
@@ -164,7 +163,7 @@ export const OpsCenterPage: React.FC = () => {
         lambda_per_client: Number(lambdaPerClient),
         heavy_ratio: Number(heavyRatio),
         seed: Number(seed),
-        load_source: loadSource,
+        load_source: "simulator",
       });
       setTestStatus(res);
       setLiveStats(null);
@@ -421,44 +420,6 @@ export const OpsCenterPage: React.FC = () => {
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Draining in-flight tasks...
               </span>
             )}
-          </div>
-
-          {/* Load Source Selector Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono uppercase text-slate-400">Load Source:</span>
-              <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
-                <button
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => setLoadSource("simulator")}
-                  className={`px-2.5 py-1 rounded text-xs font-mono transition ${
-                    loadSource === "simulator"
-                      ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm"
-                      : "text-slate-400 hover:text-slate-200"
-                  } disabled:opacity-50`}
-                >
-                  Built-in simulator (sim-1..3)
-                </button>
-                <button
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => setLoadSource("external")}
-                  className={`px-2.5 py-1 rounded text-xs font-mono transition ${
-                    loadSource === "external"
-                      ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm"
-                      : "text-slate-400 hover:text-slate-200"
-                  } disabled:opacity-50`}
-                >
-                  External laptops (tools/load_client.py)
-                </button>
-              </div>
-            </div>
-            <span className="text-[10px] font-mono text-slate-500">
-              {loadSource === "simulator"
-                ? "Autonomous async client loops dispatching through controller"
-                : "Awaiting incoming task traffic from remote test laptops"}
-            </span>
           </div>
 
           {/* Overload Warning Banner if lambda * 3 > 8.0 */}
