@@ -313,6 +313,16 @@ async def download_stats_summary(
     )
 
 
+@admin_router.get("/stats/live")
+async def get_live_dispatch_stats(
+    _auth: None = Depends(verify_admin_token),
+) -> dict[str, Any]:
+    """Return per-worker dispatched counts bucketed by second for last 60s and test totals."""
+    from app.core.live_stats import live_dispatch_tracker
+
+    return live_dispatch_tracker.get_live_stats()
+
+
 @admin_router.post("/stats/reset")
 async def reset_stats(
     _auth: None = Depends(verify_admin_token),

@@ -1,6 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Legend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+} from "chart.js";
+import { Bar, Line } from "react-chartjs-2";
+import {
   Activity,
   AlertTriangle,
   BarChart3,
@@ -11,7 +23,6 @@ import {
   Play,
   RefreshCw,
   Server,
-  Shield,
   Square,
   Trash2,
   Unlock,
@@ -20,75 +31,85 @@ import {
 import { useWebSocket } from "../hooks/useWebSocket";
 import {
   downloadStatsFile,
-  fetchStatsSummary,
+  fetchLiveDispatchStats,
   fetchTestStatus,
   resetStats,
   startAdminTest,
   stopAdminTest,
+  type LiveDispatchStatsResponse,
   type TestStatusResponse,
-  type TestSummaryRow,
 } from "../lib/api";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 const DEFAULT_ADMIN_TOKEN = "cb-admin-secret-2026";
 const WORKER_NAMES = ["worker-1", "worker-2", "worker-3"];
 
+const getBarColor = (pct: number): string => {
+  if (pct >= 85.0) return "bg-rose-500";
+  if (pct >= 60.0) return "bg-amber-500";
+  return "bg-emerald-500";
+};
+
 export const OpsCenterPage: React.FC = () => {
-  // Authentication state
+  // Row 1: Token Auth State
   const [token, setToken] = useState<string>(() => {
     return sessionStorage.getItem("cb_admin_token") || DEFAULT_ADMIN_TOKEN;
   });
   const [tokenInput, setTokenInput] = useState<string>(token);
 
-  // Test Control Form state
+  // Row 2: Compact Test Controls State
   const [mode, setMode] = useState<string>("milp");
   const [durationSec, setDurationSec] = useState<number>(30);
   const [lambdaPerClient, setLambdaPerClient] = useState<number>(5.0);
   const [heavyRatio, setHeavyRatio] = useState<number>(0.2);
   const [seed, setSeed] = useState<number>(42);
 
-  // Live Test Status state
+  // Live Test State
   const [testStatus, setTestStatus] = useState<TestStatusResponse>({ state: "idle" });
   const [countdown, setCountdown] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  // Stats Summary state
-  const [summaryRows, setSummaryRows] = useState<TestSummaryRow[]>([]);
+  // Row 3: Live Dispatch Stats for graphs
+  const [liveStats, setLiveStats] = useState<LiveDispatchStatsResponse | null>(null);
 
-  // WebSocket Live Snapshot for worker CPU and telemetry
+  // WebSocket Live Snapshot for worker CPU, RAM, and in-flight tasks
   const { snapshot } = useWebSocket();
 
-  // Test state polling
-  const pollStatus = useCallback(async () => {
+  // Polling loop (every 1.5 seconds)
+  const pollAll = useCallback(async () => {
     try {
-      const data = await fetchTestStatus();
-      setTestStatus(data);
+      const statusData = await fetchTestStatus();
+      setTestStatus(statusData);
     } catch {
       // ignore transient poll errors
     }
-  }, []);
 
-  const loadSummary = useCallback(async (currToken: string) => {
-    if (!currToken) return;
-    try {
-      const rows = await fetchStatsSummary(currToken);
-      setSummaryRows(rows);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    pollStatus();
-    const interval = setInterval(pollStatus, 500);
-    return () => clearInterval(interval);
-  }, [pollStatus]);
-
-  useEffect(() => {
     if (token) {
-      loadSummary(token);
+      try {
+        const statsData = await fetchLiveDispatchStats(token);
+        setLiveStats(statsData);
+      } catch {
+        // ignore transient poll errors
+      }
     }
-  }, [token, loadSummary]);
+  }, [token]);
+
+  useEffect(() => {
+    pollAll();
+    const interval = setInterval(pollAll, 1500);
+    return () => clearInterval(interval);
+  }, [pollAll]);
 
   // Countdown timer calculation
   useEffect(() => {
@@ -108,16 +129,17 @@ export const OpsCenterPage: React.FC = () => {
     }
   }, [testStatus]);
 
-  // When test transitions to idle, reload stats
-  const prevTestState = useRef(testStatus.state);
+  // Reset graph when new test starts
+  const prevTestId = useRef<string | null>(null);
   useEffect(() => {
-    if (prevTestState.current !== "idle" && testStatus.state === "idle" && token) {
-      loadSummary(token);
+    if (testStatus.test_id && testStatus.test_id !== "none" && testStatus.test_id !== prevTestId.current) {
+      prevTestId.current = testStatus.test_id;
+      if (token) {
+        void fetchLiveDispatchStats(token).then((data) => setLiveStats(data));
+      }
     }
-    prevTestState.current = testStatus.state;
-  }, [testStatus.state, token, loadSummary]);
+  }, [testStatus.test_id, token]);
 
-  // Auth submission
   const handleSaveToken = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = tokenInput.trim();
@@ -127,10 +149,10 @@ export const OpsCenterPage: React.FC = () => {
     }
     sessionStorage.setItem("cb_admin_token", clean);
     setToken(clean);
-    loadSummary(clean);
+    setActionMessage("Admin token saved.");
+    pollAll();
   };
 
-  // Test Actions
   const handleStartTest = async () => {
     setActionLoading(true);
     setActionMessage(null);
@@ -143,7 +165,7 @@ export const OpsCenterPage: React.FC = () => {
         seed: Number(seed),
       });
       setTestStatus(res);
-      setActionMessage(`Test armed successfully! Test ID: ${res.test_id || "armed"}`);
+      setActionMessage(`Test armed! Test ID: ${res.test_id || "armed"}`);
     } catch (err) {
       setActionMessage(`Start Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -158,7 +180,6 @@ export const OpsCenterPage: React.FC = () => {
       const res = await stopAdminTest(token);
       setTestStatus(res);
       setActionMessage("Test stopped. Draining in-flight tasks...");
-      setTimeout(() => loadSummary(token), 1000);
     } catch (err) {
       setActionMessage(`Stop Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -180,74 +201,110 @@ export const OpsCenterPage: React.FC = () => {
     }
     try {
       await resetStats(token);
-      setSummaryRows([]);
-      setActionMessage("Stats and logs cleared.");
+      setActionMessage("Test logs and summaries cleared.");
     } catch (err) {
       alert(`Reset failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  // Locked mode check
   const isLocked = testStatus.state !== "idle";
 
-  // Comparison metrics: Find latest MILP and Round Robin rows
-  const milpRow = summaryRows
-    .slice()
-    .reverse()
-    .find((r) => r.mode?.toLowerCase() === "milp");
-  const rrRow = summaryRows
-    .slice()
-    .reverse()
-    .find((r) => r.mode?.toLowerCase() === "round_robin" || r.mode?.toLowerCase() === "rr");
-
-  const calcDiffPct = (milpVal: number, rrVal: number) => {
-    if (!rrVal || isNaN(rrVal)) return 0;
-    return ((milpVal - rrVal) / rrVal) * 100;
-  };
-
-  // Worker telemetry helpers
+  // Worker telemetry getter
   const getWorkerTelemetry = (workerId: string) => {
     const w = snapshot?.workers.find((worker) => worker.worker_id === workerId);
-    const inFlight = w ? w.active_tasks : 0;
     const cpu = w ? w.cpu_percent : 12.0;
-    const isOverloaded = cpu >= 85.0 || inFlight >= 5;
+    const ram = w ? w.memory_percent : 20.0;
+    const inFlight = w ? w.active_tasks : 0;
+    const queueLength = w ? (w.queue_length ?? (inFlight > 2 ? inFlight - 2 : 0)) : 0;
+    const isOverloaded = cpu >= 85.0 || ram >= 90.0 || queueLength >= 4;
+
     return {
       cpu,
+      ram,
       inFlight,
+      queueLength,
       isOverloaded,
     };
   };
 
+  // Live Chart Data: Last 60s Dispatched Rate
+  const chartLabels = liveStats?.labels ?? Array.from({ length: 60 }, (_, i) => (i === 59 ? "now" : `-${59 - i}s`));
+  const w1Data = liveStats?.series?.["worker-1"] ?? Array(60).fill(0);
+  const w2Data = liveStats?.series?.["worker-2"] ?? Array(60).fill(0);
+  const w3Data = liveStats?.series?.["worker-3"] ?? Array(60).fill(0);
+
+  const lineChartData = {
+    labels: chartLabels,
+    datasets: [
+      {
+        label: "worker-1",
+        data: w1Data,
+        borderColor: "#06b6d4", // cyan
+        backgroundColor: "rgba(6, 182, 212, 0.1)",
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 2,
+      },
+      {
+        label: "worker-2",
+        data: w2Data,
+        borderColor: "#f59e0b", // amber
+        backgroundColor: "rgba(245, 158, 11, 0.1)",
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 2,
+      },
+      {
+        label: "worker-3",
+        data: w3Data,
+        borderColor: "#a855f7", // purple
+        backgroundColor: "rgba(168, 85, 247, 0.1)",
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 2,
+      },
+    ],
+  };
+
+  // Cumulative Totals Bar Chart
+  const totals = liveStats?.current_test_totals ?? { "worker-1": 0, "worker-2": 0, "worker-3": 0 };
+  const totalsBarData = {
+    labels: ["worker-1", "worker-2", "worker-3"],
+    datasets: [
+      {
+        label: "Tasks Dispatched",
+        data: [totals["worker-1"], totals["worker-2"], totals["worker-3"]],
+        backgroundColor: ["#06b6d4", "#f59e0b", "#a855f7"],
+        borderRadius: 4,
+      },
+    ],
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Header */}
+      {/* Top Navbar */}
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
-              <Activity className="w-5 h-5" />
+            <div className="h-8 w-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+              <Activity className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base tracking-tight text-white">
-                  CLOUD<span className="text-cyan-400">BALANCE</span>
-                </span>
-                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                  /ops Admin
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Cluster Operations & Benchmark Control Center
-              </p>
+              <span className="font-bold text-sm tracking-tight text-white">
+                CLOUD<span className="text-cyan-400">BALANCE</span>
+              </span>
+              <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 ml-2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                /ops
+              </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Link
               to="/"
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
             >
-              <span>Public Tools (/)</span>
+              Public Tools (/)
             </Link>
             <Link
               to="/benchmark"
@@ -260,17 +317,15 @@ export const OpsCenterPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* Token Authentication Bar */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <Key className="w-4 h-4 text-cyan-400" />
-            <span className="text-xs font-mono text-slate-300">
-              Admin Bearer Token:{" "}
-              <span className="text-cyan-300 font-bold">
-                {token ? `${token.slice(0, 10)}...` : "Not Set"}
-              </span>
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-5 space-y-4">
+        {/* Row 1: Admin Token Bar */}
+        <section aria-label="Admin Token Bar" className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
+            <Key className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Admin Token:</span>
+            <span className="text-cyan-400 font-bold">
+              {token ? `${token.slice(0, 12)}...` : "Not Set"}
             </span>
           </div>
 
@@ -280,22 +335,22 @@ export const OpsCenterPage: React.FC = () => {
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="Enter ADMIN_TOKEN"
-              className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-500 w-full sm:w-56"
+              className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-500 w-full sm:w-60 font-mono"
             />
             <button
               type="submit"
-              className="px-3 py-1 rounded-lg text-xs font-medium bg-cyan-600 hover:bg-cyan-500 text-white shrink-0"
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-cyan-600 hover:bg-cyan-500 text-white shrink-0 transition"
             >
               Save Token
             </button>
           </form>
-        </div>
+        </section>
 
-        {/* Action Message Alert */}
+        {/* Action Alert Notification */}
         {actionMessage && (
-          <div className="p-3 rounded-xl bg-slate-900 border border-cyan-500/30 text-cyan-200 text-xs flex items-center justify-between">
+          <div className="p-2.5 rounded-lg bg-slate-900 border border-cyan-500/30 text-cyan-200 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
+              <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
               <span>{actionMessage}</span>
             </div>
             <button
@@ -307,23 +362,16 @@ export const OpsCenterPage: React.FC = () => {
           </div>
         )}
 
-        {/* Section 1: D3 Controls and Live Panel */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Controls Column (5 cols) */}
-          <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-cyan-400" />
-                  Benchmark Test Controls
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Configure and start automated load test runs.
-                </p>
-              </div>
+        {/* Row 2: Test Controls (Full width and compact) */}
+        <section aria-label="Test Controls" className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold">
+                Test Controls
+              </h2>
               {isLocked ? (
                 <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                  <Lock className="w-3 h-3" /> Locked
+                  <Lock className="w-3 h-3" /> Locked ({testStatus.state})
                 </span>
               ) : (
                 <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
@@ -332,502 +380,332 @@ export const OpsCenterPage: React.FC = () => {
               )}
             </div>
 
-            <div className="space-y-3.5">
-              {/* Mode Selector - Disabled while running */}
-              <div>
-                <label className="text-xs font-mono uppercase text-slate-300 block mb-1">
-                  Scheduler Mode
-                </label>
-                <select
-                  value={mode}
-                  disabled={isLocked}
-                  onChange={(e) => setMode(e.target.value)}
-                  className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none transition ${
-                    isLocked
-                      ? "border-slate-800 opacity-60 cursor-not-allowed"
-                      : "border-slate-700 focus:border-cyan-500"
-                  }`}
-                >
-                  <option value="milp">ortools_milp (MILP Optimization)</option>
-                  <option value="round_robin">round_robin (Isolated Strict RR)</option>
-                </select>
-                {isLocked && (
-                  <p className="text-[10px] text-amber-400/80 mt-1">
-                    * Mode selector locked while test is active (HTTP 409 protection).
-                  </p>
-                )}
-              </div>
-
-              {/* Grid Inputs: Duration, Lambda */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-mono uppercase text-slate-300 block mb-1">
-                    Duration (s)
-                  </label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="600"
-                    disabled={isLocked}
-                    value={durationSec}
-                    onChange={(e) => setDurationSec(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-mono uppercase text-slate-300 block mb-1">
-                    λ (req/sec/client)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0.5"
-                    max="50"
-                    disabled={isLocked}
-                    value={lambdaPerClient}
-                    onChange={(e) => setLambdaPerClient(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-
-              {/* Grid Inputs: Heavy Ratio, Seed */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-mono uppercase text-slate-300 block mb-1">
-                    Heavy Ratio (0-1)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    max="1"
-                    disabled={isLocked}
-                    value={heavyRatio}
-                    onChange={(e) => setHeavyRatio(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-mono uppercase text-slate-300 block mb-1">
-                    PRNG Seed
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="999999"
-                    disabled={isLocked}
-                    value={seed}
-                    onChange={(e) => setSeed(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-
-              {/* Start & Stop Action Buttons */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleStartTest}
-                  disabled={isLocked || actionLoading}
-                  className="py-2.5 rounded-xl font-semibold text-xs bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white flex items-center justify-center gap-1.5 transition shadow-sm"
-                >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>Start Test</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleStopTest}
-                  disabled={!isLocked || actionLoading}
-                  className="py-2.5 rounded-xl font-semibold text-xs bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white flex items-center justify-center gap-1.5 transition shadow-sm"
-                >
-                  <Square className="w-3.5 h-3.5 fill-white" />
-                  <span>Stop Test</span>
-                </button>
-              </div>
-            </div>
+            {/* Countdown / State indicator */}
+            {testStatus.state === "armed" && (
+              <span className="text-xs font-mono text-amber-400 flex items-center gap-1.5 animate-pulse">
+                <Clock className="w-3.5 h-3.5" /> Arming in <strong>{countdown}s</strong>
+              </span>
+            )}
+            {testStatus.state === "running" && (
+              <span className="text-xs font-mono text-emerald-400 flex items-center gap-1.5 animate-pulse">
+                <Clock className="w-3.5 h-3.5" /> Running: <strong>{countdown}s remaining</strong>
+              </span>
+            )}
+            {testStatus.state === "draining" && (
+              <span className="text-xs font-mono text-cyan-400 flex items-center gap-1.5 animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Draining in-flight tasks...
+              </span>
+            )}
           </div>
 
-          {/* Live Panel Column (7 cols) */}
-          <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-cyan-400" />
-                  Live Cluster Telemetry Panel
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Real-time status, countdown timer, and worker load metrics.
-                </p>
-              </div>
-
-              {/* Live State Badge */}
-              <div className="flex items-center gap-2">
-                <span
-                  className={`text-xs font-mono font-bold uppercase px-3 py-1 rounded-full border flex items-center gap-1.5 ${
-                    testStatus.state === "running"
-                      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40 animate-pulse"
-                      : testStatus.state === "armed"
-                        ? "bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse"
-                        : testStatus.state === "draining"
-                          ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/40 animate-pulse"
-                          : "bg-slate-800 text-slate-300 border-slate-700"
-                  }`}
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      testStatus.state === "running"
-                        ? "bg-emerald-400"
-                        : testStatus.state === "armed"
-                          ? "bg-amber-400"
-                          : testStatus.state === "draining"
-                            ? "bg-cyan-400"
-                            : "bg-slate-400"
-                    }`}
-                  />
-                  {testStatus.state}
-                </span>
-              </div>
+          {/* Compact Input Controls Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 items-end">
+            {/* Scheduler */}
+            <div className="col-span-2 sm:col-span-1 lg:col-span-2">
+              <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                Scheduler
+              </label>
+              <select
+                value={mode}
+                disabled={isLocked}
+                onChange={(e) => setMode(e.target.value)}
+                className={`w-full bg-slate-950 border rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none transition ${
+                  isLocked ? "border-slate-800 opacity-60 cursor-not-allowed" : "border-slate-700 focus:border-cyan-500"
+                }`}
+              >
+                <option value="milp">ortools_milp</option>
+                <option value="round_robin">round_robin</option>
+              </select>
             </div>
 
-            {/* Countdown / Status Info Banner */}
-            <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <span className="text-[10px] uppercase font-mono text-slate-400 block">
-                  Active Test Identifier
-                </span>
-                <span className="text-xs font-mono text-cyan-300 font-bold">
-                  {testStatus.test_id || "None (idle)"}
-                </span>
-              </div>
-
-              {testStatus.state === "armed" && (
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-amber-400 animate-spin" />
-                  <span className="text-xs font-mono text-amber-300">
-                    Arming Countdown: <strong className="text-sm font-bold">{countdown}s</strong>
-                  </span>
-                </div>
-              )}
-
-              {testStatus.state === "running" && (
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-mono text-emerald-300">
-                    Time Remaining: <strong className="text-sm font-bold">{countdown}s</strong>
-                  </span>
-                </div>
-              )}
-
-              {testStatus.state === "draining" && (
-                <div className="flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
-                  <span className="text-xs font-mono text-cyan-300">
-                    Draining in-flight requests (wait up to 15s)...
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Per-Worker In-Flight & CPU Bars with Red Overloaded Badge */}
-            <div className="space-y-3 pt-1">
-              {WORKER_NAMES.map((wName) => {
-                const tel = getWorkerTelemetry(wName);
-                return (
-                  <div
-                    key={wName}
-                    className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Server className="w-3.5 h-3.5 text-cyan-400" />
-                        <span className="text-xs font-mono font-bold text-white">{wName}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                          {tel.inFlight} in-flight
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {tel.isOverloaded && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> OVERLOADED
-                          </span>
-                        )}
-                        <span className="text-xs font-mono text-cyan-300 font-bold">
-                          {tel.cpu.toFixed(1)}% CPU
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          tel.cpu >= 85.0
-                            ? "bg-rose-500"
-                            : tel.cpu >= 65.0
-                              ? "bg-amber-400"
-                              : "bg-cyan-500"
-                        }`}
-                        style={{ width: `${Math.min(100, Math.max(2, tel.cpu))}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: D4 Results & Side-by-Side Comparison */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-6 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            {/* Duration (s) */}
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-emerald-400" />
-                Benchmark Results & Comparison (D4)
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Side-by-side performance comparison: MILP vs Round Robin with percentage delta.
-              </p>
+              <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                Duration (s)
+              </label>
+              <input
+                type="number"
+                min="5"
+                max="600"
+                disabled={isLocked}
+                value={durationSec}
+                onChange={(e) => setDurationSec(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
+              />
             </div>
 
-            {/* Action Buttons: Downloads & Reset */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Rate λ */}
+            <div>
+              <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                Rate λ (req/s/client)
+              </label>
+              <input
+                type="number"
+                step="0.5"
+                min="0.5"
+                max="50"
+                disabled={isLocked}
+                value={lambdaPerClient}
+                onChange={(e) => setLambdaPerClient(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
+              />
+            </div>
+
+            {/* Heavy ratio */}
+            <div>
+              <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                Heavy ratio
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                disabled={isLocked}
+                value={heavyRatio}
+                onChange={(e) => setHeavyRatio(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
+              />
+            </div>
+
+            {/* Seed */}
+            <div>
+              <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                Seed
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="999999"
+                disabled={isLocked}
+                value={seed}
+                onChange={(e) => setSeed(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 disabled:opacity-60"
+              />
+            </div>
+
+            {/* Start / Stop Action Buttons */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleStartTest}
+                disabled={isLocked || actionLoading}
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white flex items-center justify-center gap-1 transition"
+              >
+                <Play className="w-3 h-3 fill-white" />
+                <span>Start</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleStopTest}
+                disabled={!isLocked || actionLoading}
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white flex items-center justify-center gap-1 transition"
+              >
+                <Square className="w-3 h-3 fill-white" />
+                <span>Stop</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Secondary Row: Downloads & Reset */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+            <span className="text-[11px] font-mono text-slate-400">
+              Active Test: <strong className="text-cyan-300">{testStatus.test_id || "none"}</strong>
+            </span>
+
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleDownload("summary")}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition"
+                className="px-2.5 py-1 rounded text-[11px] font-mono bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 flex items-center gap-1 transition"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>test_summary.csv</span>
               </button>
-
               <button
                 type="button"
                 onClick={() => handleDownload("log")}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition"
+                className="px-2.5 py-1 rounded text-[11px] font-mono bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 flex items-center gap-1 transition"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>test_log.csv</span>
               </button>
-
               <button
                 type="button"
                 onClick={handleResetStats}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-rose-900/40 text-rose-300 border border-rose-500/30 flex items-center gap-1.5 transition"
+                className="px-2.5 py-1 rounded text-[11px] font-mono bg-slate-950 hover:bg-rose-950/50 text-rose-300 border border-slate-700 flex items-center gap-1 transition"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-3 h-3" />
                 <span>Reset</span>
               </button>
             </div>
           </div>
+        </section>
 
-          {/* Side-by-Side Comparison Table */}
-          {milpRow && rrRow ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/60">
-                    <th className="py-2.5 px-3">Performance Metric</th>
-                    <th className="py-2.5 px-3 text-cyan-400 font-bold">OR-Tools MILP</th>
-                    <th className="py-2.5 px-3 text-amber-400 font-bold">Round Robin</th>
-                    <th className="py-2.5 px-3">Difference Delta</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {/* avg_ms */}
-                  <tr>
-                    <td className="py-2.5 px-3 font-medium text-slate-300">Average Latency (avg_ms)</td>
-                    <td className="py-2.5 px-3 text-white font-bold">{Number(milpRow.avg_ms).toFixed(2)} ms</td>
-                    <td className="py-2.5 px-3 text-white">{Number(rrRow.avg_ms).toFixed(2)} ms</td>
-                    <td className="py-2.5 px-3">
-                      {(() => {
-                        const diff = calcDiffPct(Number(milpRow.avg_ms), Number(rrRow.avg_ms));
-                        const isBetter = diff <= 0;
-                        return (
-                          <span
-                            className={`font-bold ${isBetter ? "text-emerald-400" : "text-rose-400"}`}
-                          >
-                            {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
-                            {isBetter ? "(MILP Faster)" : "(RR Faster)"}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  </tr>
+        {/* Row 3: Live Cluster Panel (Full width, on its own new line) */}
+        <section aria-label="Live Cluster Panel" className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h2 className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold flex items-center gap-2">
+              <Server className="w-3.5 h-3.5 text-cyan-400" />
+              Live Cluster Panel
+            </h2>
+            <span className="text-[11px] font-mono text-slate-500">
+              Telemetry Polled every 1.5s
+            </span>
+          </div>
 
-                  {/* p95_ms */}
-                  <tr>
-                    <td className="py-2.5 px-3 font-medium text-slate-300">P95 Latency (p95_ms)</td>
-                    <td className="py-2.5 px-3 text-white font-bold">{Number(milpRow.p95_ms).toFixed(2)} ms</td>
-                    <td className="py-2.5 px-3 text-white">{Number(rrRow.p95_ms).toFixed(2)} ms</td>
-                    <td className="py-2.5 px-3">
-                      {(() => {
-                        const diff = calcDiffPct(Number(milpRow.p95_ms), Number(rrRow.p95_ms));
-                        const isBetter = diff <= 0;
-                        return (
-                          <span
-                            className={`font-bold ${isBetter ? "text-emerald-400" : "text-rose-400"}`}
-                          >
-                            {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
-                            {isBetter ? "(Lower Tail Latency)" : ""}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  </tr>
+          {/* Three Worker Cards Side by Side (Stacked on phone) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {WORKER_NAMES.map((wName) => {
+              const tel = getWorkerTelemetry(wName);
+              const cpuColor = getBarColor(tel.cpu);
+              const ramColor = getBarColor(tel.ram);
 
-                  {/* failed */}
-                  <tr>
-                    <td className="py-2.5 px-3 font-medium text-slate-300">Failed / 503 Requests</td>
-                    <td className="py-2.5 px-3 text-white font-bold">{milpRow.failed}</td>
-                    <td className="py-2.5 px-3 text-white">{rrRow.failed}</td>
-                    <td className="py-2.5 px-3">
-                      {Number(milpRow.failed) <= Number(rrRow.failed) ? (
-                        <span className="text-emerald-400 font-bold">
-                          -{Number(rrRow.failed) - Number(milpRow.failed)} fewer failures
-                        </span>
-                      ) : (
-                        <span className="text-rose-400 font-bold">
-                          +{Number(milpRow.failed) - Number(rrRow.failed)} failures
+              return (
+                <div
+                  key={wName}
+                  className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3"
+                >
+                  {/* Card Header: Worker Name + Badges */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold text-white">{wName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {tel.isOverloaded && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> OVERLOADED
                         </span>
                       )}
-                    </td>
-                  </tr>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
+                        {tel.inFlight} in-flight
+                      </span>
+                    </div>
+                  </div>
 
-                  {/* busy_time_stddev */}
-                  <tr>
-                    <td className="py-2.5 px-3 font-medium text-slate-300">
-                      Busy Time Std-Dev (Load Balance)
-                    </td>
-                    <td className="py-2.5 px-3 text-white font-bold">
-                      {Number(milpRow.busy_time_stddev).toFixed(2)} ms
-                    </td>
-                    <td className="py-2.5 px-3 text-white">
-                      {Number(rrRow.busy_time_stddev).toFixed(2)} ms
-                    </td>
-                    <td className="py-2.5 px-3">
-                      {(() => {
-                        const diff = calcDiffPct(
-                          Number(milpRow.busy_time_stddev),
-                          Number(rrRow.busy_time_stddev)
-                        );
-                        const isBetter = diff <= 0;
-                        return (
-                          <span
-                            className={`font-bold ${isBetter ? "text-emerald-400" : "text-amber-400"}`}
-                          >
-                            {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
-                            {isBetter ? "(More Uniform Balancing)" : ""}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  </tr>
+                  {/* CPU % Bar */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-mono">
+                      <span className="text-slate-400">CPU</span>
+                      <span className="text-white font-semibold">{tel.cpu.toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${cpuColor}`}
+                        style={{ width: `${Math.min(100, Math.max(2, tel.cpu))}%` }}
+                      />
+                    </div>
+                  </div>
 
-                  {/* throughput_rps */}
-                  <tr>
-                    <td className="py-2.5 px-3 font-medium text-slate-300">Throughput (rps)</td>
-                    <td className="py-2.5 px-3 text-white font-bold">
-                      {Number(milpRow.throughput_rps).toFixed(2)} req/s
-                    </td>
-                    <td className="py-2.5 px-3 text-white">
-                      {Number(rrRow.throughput_rps).toFixed(2)} req/s
-                    </td>
-                    <td className="py-2.5 px-3">
-                      {(() => {
-                        const diff = calcDiffPct(
-                          Number(milpRow.throughput_rps),
-                          Number(rrRow.throughput_rps)
-                        );
-                        return (
-                          <span className="text-slate-300">
-                            {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="p-5 rounded-xl bg-slate-950/80 border border-slate-800 text-center space-y-1.5">
-              <Clock className="w-5 h-5 text-slate-500 mx-auto" />
-              <p className="text-xs text-slate-300">
-                Awaiting test runs for both <strong>MILP</strong> and <strong>Round Robin</strong>{" "}
-                modes to generate side-by-side comparison.
-              </p>
-              <p className="text-[11px] text-slate-500">
-                Run one test in Round Robin mode and one test in MILP mode using the controls above.
-              </p>
-            </div>
-          )}
+                  {/* Memory (RAM) % Bar */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-mono">
+                      <span className="text-slate-400">Memory (RAM)</span>
+                      <span className="text-white font-semibold">{tel.ram.toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${ramColor}`}
+                        style={{ width: `${Math.min(100, Math.max(2, tel.ram))}%` }}
+                      />
+                    </div>
+                  </div>
 
-          {/* Full History Table */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-mono uppercase text-slate-400 tracking-wider">
-              All Completed Test Summaries ({summaryRows.length} runs)
-            </h3>
-
-            {summaryRows.length > 0 ? (
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-left text-xs font-mono border-collapse">
-                  <thead>
-                    <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
-                      <th className="py-2 px-3">Test ID</th>
-                      <th className="py-2 px-3">Mode</th>
-                      <th className="py-2 px-3">Duration</th>
-                      <th className="py-2 px-3">Reqs</th>
-                      <th className="py-2 px-3">Failed</th>
-                      <th className="py-2 px-3">Avg Latency</th>
-                      <th className="py-2 px-3">P95 Latency</th>
-                      <th className="py-2 px-3">Busy StdDev</th>
-                      <th className="py-2 px-3">Throughput</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
-                    {summaryRows.map((r, i) => (
-                      <tr key={i} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2 px-3 text-cyan-300">{r.test_id}</td>
-                        <td className="py-2 px-3">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] ${
-                              r.mode === "milp"
-                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
-                                : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            }`}
-                          >
-                            {r.mode}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-slate-300">{r.duration_s}s</td>
-                        <td className="py-2 px-3 text-white">{r.requests}</td>
-                        <td
-                          className={`py-2 px-3 ${Number(r.failed) > 0 ? "text-rose-400 font-bold" : "text-emerald-400"}`}
-                        >
-                          {r.failed}
-                        </td>
-                        <td className="py-2 px-3 text-white">{Number(r.avg_ms).toFixed(1)} ms</td>
-                        <td className="py-2 px-3 text-white">{Number(r.p95_ms).toFixed(1)} ms</td>
-                        <td className="py-2 px-3 text-white">{Number(r.busy_time_stddev).toFixed(1)} ms</td>
-                        <td className="py-2 px-3 text-slate-300">
-                          {Number(r.throughput_rps).toFixed(1)} rps
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">No completed test records in test_summary.csv yet.</p>
-            )}
+                  {/* Queue length & Concurrency footer */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[10px] font-mono text-slate-400">
+                    <span>Queue Length: <strong className={tel.queueLength > 0 ? "text-amber-400" : "text-slate-300"}>{tel.queueLength}</strong></span>
+                    <span>Limit: 2 simultaneous</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+
+          {/* Task Distribution Graphs (Under Worker Cards) */}
+          <div className="pt-2 border-t border-slate-800/80">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Left: Live Multi-Line Chart (Dispatched tasks / sec over last 60s) */}
+              <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-3 h-64 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-mono font-bold text-slate-200">
+                    Task Dispatch Rate (Last 60s)
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    tasks dispatched / second
+                  </span>
+                </div>
+                <div className="flex-1 relative">
+                  <Line
+                    data={lineChartData}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      animation: { duration: 0 },
+                      plugins: {
+                        legend: {
+                          position: "top",
+                          labels: { color: "#cbd5e1", font: { size: 10, family: "monospace" }, boxWidth: 12 },
+                        },
+                      },
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 } },
+                          grid: { color: "rgba(51, 65, 85, 0.3)" },
+                        },
+                        x: {
+                          ticks: {
+                            color: "#94a3b8",
+                            font: { size: 9 },
+                            maxTicksLimit: 12,
+                          },
+                          grid: { display: false },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Right: Cumulative Per-Worker Totals Bar Chart */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 h-64 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-mono font-bold text-slate-200">
+                    Current Test Totals
+                  </h3>
+                  <span className="text-[10px] font-mono text-cyan-400 font-bold">
+                    {liveStats?.total_dispatched ?? 0} total
+                  </span>
+                </div>
+                <div className="flex-1 relative">
+                  <Bar
+                    data={totalsBarData}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      animation: { duration: 200 },
+                      plugins: {
+                        legend: { display: false },
+                      },
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          ticks: { color: "#94a3b8", precision: 0, font: { size: 10 } },
+                          grid: { color: "rgba(51, 65, 85, 0.3)" },
+                        },
+                        x: {
+                          ticks: { color: "#cbd5e1", font: { size: 10, family: "monospace" } },
+                          grid: { display: false },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   );

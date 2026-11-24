@@ -80,6 +80,7 @@ def sample_worker_telemetry(
         "memory_percent": mem_pct,
         "load_avg_1m": load_1m,
         "active_task_count": active_tasks,
+        "queue_length": runtime_state.current_queue_length if runtime_state else 0,
     }
 
 

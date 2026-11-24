@@ -51,7 +51,6 @@ class TaskContractResponse(BaseModel):
     queue_ms: float
     exec_ms: float
     total_ms: float
-    dispatch_seq: int | str | None = Field(default=None)
 
 
 def _get_batcher(request: Request) -> MicroBatcherService:
@@ -142,19 +141,15 @@ async def execute_task_contract(
         dispatch_seq = "none"
         scheduler_used = "ortools_milp"
 
-    # 3. Capture worker in-flight count & CPU % at dispatch
+    # 3. Capture worker in-flight count & CPU % at dispatch and record live stats
+    from app.core.live_stats import live_dispatch_tracker
+
+    live_dispatch_tracker.record_dispatch(assigned_worker)
     worker_inflight_at_dispatch = in_flight.increment(assigned_worker)
     await redis_client.incr(f"inflight:{assigned_worker}")
     await redis_client.incr(f"cluster:inflight:{assigned_worker}")
 
-    worker_snap = None
-    if hasattr(cluster_state, "get_worker"):
-        worker_snap = await cluster_state.get_worker(assigned_worker)
-    if not worker_snap and hasattr(cluster_state, "get_active_workers"):
-        for w in await cluster_state.get_active_workers():
-            if w.worker_id == assigned_worker:
-                worker_snap = w
-                break
+    worker_snap = await cluster_state.get_worker(assigned_worker)
     worker_cpu_pct_at_dispatch = worker_snap.cpu_percent if worker_snap else 10.0
 
     # 4. Forward to the worker
@@ -262,7 +257,6 @@ async def execute_task_contract(
         queue_ms=round(queue_ms, 2),
         exec_ms=round(exec_ms, 2),
         total_ms=total_ms,
-        dispatch_seq=dispatch_seq,
     )
 
 

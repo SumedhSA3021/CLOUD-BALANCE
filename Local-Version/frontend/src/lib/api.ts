@@ -266,6 +266,34 @@ export async function downloadStatsFile(
   window.URL.revokeObjectURL(url);
 }
 
+export interface LiveDispatchStatsResponse {
+  window_seconds: number;
+  timestamps: number[];
+  labels: string[];
+  series: {
+    "worker-1": number[];
+    "worker-2": number[];
+    "worker-3": number[];
+  };
+  current_test_totals: {
+    "worker-1": number;
+    "worker-2": number;
+    "worker-3": number;
+  };
+  total_dispatched: number;
+}
+
+export async function fetchLiveDispatchStats(
+  token: string
+): Promise<LiveDispatchStatsResponse> {
+  return requestJson<LiveDispatchStatsResponse>("/admin/stats/live", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export async function resetStats(
   token: string
 ): Promise<{ status: string; detail: string }> {

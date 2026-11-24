@@ -165,6 +165,7 @@ class Telemetry(BaseModel):
     memory_percent: float = Field(..., ge=0.0, le=100.0)
     load_avg_1m: float = Field(..., ge=0.0)
     active_task_count: int = Field(..., ge=0)
+    queue_length: int = Field(default=0, ge=0)
 
     @field_validator("memory_used_mb")
     @classmethod
@@ -189,6 +190,7 @@ class WorkerSnapshotItem(BaseModel):
     load_avg_1m: float = 0.0
     in_flight_cpu_pct: float = 0.0
     in_flight_mem_mb: float = 0.0
+    queue_length: int = 0
 
     @classmethod
     def from_telemetry(
@@ -208,6 +210,9 @@ class WorkerSnapshotItem(BaseModel):
             round((effective_mem_used / telemetry.memory_total_mb) * 100.0, 2),
         )
         active = telemetry.active_task_count + in_flight_tasks
+        q_len = getattr(telemetry, "queue_length", 0)
+        if q_len == 0 and active > 2:
+            q_len = active - 2
         return cls(
             worker_id=telemetry.worker_id,
             ip_address=telemetry.ip_address,
@@ -221,6 +226,7 @@ class WorkerSnapshotItem(BaseModel):
             load_avg_1m=round(telemetry.load_avg_1m, 2),
             in_flight_cpu_pct=round(in_flight_cpu_pct, 2),
             in_flight_mem_mb=round(in_flight_mem_mb, 2),
+            queue_length=q_len,
         )
 
 

@@ -11,8 +11,10 @@ import {
 import { Bar } from "react-chartjs-2";
 import {
   ArrowDownRight,
+  BarChart3,
   CheckCircle2,
   Clock,
+  Download,
   Play,
   Shield,
   Sparkles,
@@ -20,7 +22,13 @@ import {
   Trophy,
   Zap,
 } from "lucide-react";
-import { fetchBenchmarkRuns, runNewBenchmark } from "../lib/api";
+import {
+  downloadStatsFile,
+  fetchBenchmarkRuns,
+  fetchStatsSummary,
+  runNewBenchmark,
+  type TestSummaryRow,
+} from "../lib/api";
 import type { BenchmarkRun } from "../lib/types";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -31,6 +39,11 @@ export const BenchmarkSection: React.FC = () => {
   const [runningNew, setRunningNew] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSeed, setSelectedSeed] = useState<number>(42);
+
+  // Completed Test Summaries State
+  const [summaryRows, setSummaryRows] = useState<TestSummaryRow[]>([]);
+
+  const token = sessionStorage.getItem("cb_admin_token") || "cb-admin-secret-2026";
 
   const loadRuns = async () => {
     setLoading(true);
@@ -45,8 +58,18 @@ export const BenchmarkSection: React.FC = () => {
     }
   };
 
+  const loadSummaries = async () => {
+    try {
+      const rows = await fetchStatsSummary(token);
+      setSummaryRows(rows);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     void loadRuns();
+    void loadSummaries();
   }, []);
 
   const handleTriggerRun = async () => {
@@ -62,12 +85,19 @@ export const BenchmarkSection: React.FC = () => {
     }
   };
 
+  const handleDownload = async (file: "summary" | "log") => {
+    try {
+      await downloadStatsFile(token, file);
+    } catch (err) {
+      alert(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const activeRun = runs[0];
-  // Strictly isolated 2-Scheduler evaluation: OR-Tools MILP vs Round Robin
   const schedOrder = ["ortools_milp", "round_robin"];
   const labels = ["OR-Tools MILP", "Round Robin"];
 
-  // Compute comparative delta metrics
+  // Compute comparative delta metrics for Replay
   const milpMetrics = activeRun?.results?.["ortools_milp"];
   const rrMetrics = activeRun?.results?.["round_robin"];
 
@@ -93,9 +123,24 @@ export const BenchmarkSection: React.FC = () => {
   const violationsSaved =
     milpMetrics && rrMetrics ? rrMetrics.total_cap_violations - milpMetrics.total_cap_violations : 0;
 
+  // Comparison metrics from test_summary.csv
+  const latestMilpSummary = summaryRows
+    .slice()
+    .reverse()
+    .find((r) => r.mode?.toLowerCase() === "milp");
+  const latestRrSummary = summaryRows
+    .slice()
+    .reverse()
+    .find((r) => r.mode?.toLowerCase() === "round_robin" || r.mode?.toLowerCase() === "rr");
+
+  const calcDiffPct = (milpVal: number, rrVal: number) => {
+    if (!rrVal || isNaN(rrVal)) return 0;
+    return ((milpVal - rrVal) / rrVal) * 100;
+  };
+
   return (
-    <div className="space-y-4">
-      {/* Top Banner Card */}
+    <div className="space-y-6">
+      {/* 1. Replay Simulation Benchmark Header */}
       <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 shadow-lg flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300">
@@ -118,7 +163,6 @@ export const BenchmarkSection: React.FC = () => {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
-          {/* Seed Presets */}
           <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
             {[42, 100, 777].map((s) => (
               <button
@@ -163,7 +207,6 @@ export const BenchmarkSection: React.FC = () => {
           {/* KPI Delta Comparison Summary Bar */}
           {milpMetrics && rrMetrics && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Card 1: CPU Imbalance */}
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-slate-400 block">
@@ -184,7 +227,6 @@ export const BenchmarkSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Card 2: P95 Tail Latency */}
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-slate-400 block">
@@ -205,7 +247,6 @@ export const BenchmarkSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Card 3: Mean Latency */}
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-slate-400 block">
@@ -228,7 +269,6 @@ export const BenchmarkSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Card 4: SLA Cap Violations */}
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-slate-400 block">
@@ -253,7 +293,6 @@ export const BenchmarkSection: React.FC = () => {
 
           {/* Side-by-Side Comparison Graphs */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Chart 1: CPU Imbalance StdDev & Cap Violations */}
             <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 h-72 flex flex-col">
               <h3 className="text-xs font-semibold text-slate-200 mb-2">
                 Cluster Load Imbalance (CPU StdDev %) & SLA Cap Violations (Lower is Better)
@@ -306,7 +345,6 @@ export const BenchmarkSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Chart 2: Mean & P95 Completion Latency */}
             <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 h-72 flex flex-col">
               <h3 className="text-xs font-semibold text-slate-200 mb-2">
                 Task Completion Latency Mean vs P95 (ms) (Lower is Better)
@@ -359,105 +397,214 @@ export const BenchmarkSection: React.FC = () => {
               </div>
             </div>
           </div>
+        </>
+      ) : null}
 
-          {/* Summary Comparison Table */}
-          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 overflow-x-auto shadow-lg">
-            <div className="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
-              <h3 className="text-xs font-semibold text-white">
-                Run <code className="text-cyan-300">{activeRun.run_id}</code> — Detailed Metric Comparison ({activeRun.total_tasks} Seeded Tasks)
-              </h3>
-              <span className="text-[11px] font-mono text-slate-400">
-                Duration: {activeRun.duration_sec}s | Seed: {activeRun.seed}
-              </span>
-            </div>
+      {/* 2. Benchmark Results & Comparison (from test_summary.csv) */}
+      <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-5 space-y-5 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-emerald-400" />
+              Benchmark Results & Comparison
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Live test results from test_summary.csv comparing OR-Tools MILP vs Round Robin with percentage delta.
+            </p>
+          </div>
 
-            <table className="w-full text-left border-collapse text-xs font-mono">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 uppercase text-[11px]">
-                  <th className="py-2.5 px-3">Scheduler</th>
-                  <th className="py-2.5 px-3">Mean CPU StdDev</th>
-                  <th className="py-2.5 px-3">Peak CPU %</th>
-                  <th className="py-2.5 px-3">Peak RAM %</th>
-                  <th className="py-2.5 px-3">Cap Violations</th>
-                  <th className="py-2.5 px-3">Mean Latency</th>
-                  <th className="py-2.5 px-3">P95 Latency</th>
-                  <th className="py-2.5 px-3">Solver Time</th>
-                  <th className="py-2.5 px-3">Performance Note</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/70">
-                {schedOrder.map((key) => {
-                  const m = activeRun.results[key];
-                  if (!m) return null;
-                  const isMilp = key === "ortools_milp";
-                  return (
-                    <tr
-                      key={key}
-                      className={
-                        isMilp
-                          ? "bg-cyan-500/10 text-white font-semibold border-l-2 border-cyan-400"
-                          : "text-slate-300"
-                      }
-                    >
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs ${
-                            isMilp
-                              ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold"
-                              : "bg-slate-800 text-amber-300 border border-slate-700"
-                          }`}
-                        >
-                          {key === "ortools_milp" ? "ortools_milp" : "round_robin"}
-                        </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleDownload("summary")}
+              className="px-2.5 py-1 rounded text-xs font-mono bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 flex items-center gap-1.5 transition"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>test_summary.csv</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownload("log")}
+              className="px-2.5 py-1 rounded text-xs font-mono bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 flex items-center gap-1.5 transition"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>test_log.csv</span>
+            </button>
+          </div>
+        </div>
+
+        {summaryRows.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-400 rounded-xl bg-slate-950 border border-slate-800">
+            No completed tests yet
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* Side-by-Side Comparison Table if both MILP and RR runs exist */}
+            {latestMilpSummary && latestRrSummary ? (
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-left text-xs font-mono border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/60">
+                      <th className="py-2.5 px-3">Metric</th>
+                      <th className="py-2.5 px-3 text-cyan-400 font-bold">OR-Tools MILP</th>
+                      <th className="py-2.5 px-3 text-amber-400 font-bold">Round Robin</th>
+                      <th className="py-2.5 px-3">Difference Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {/* avg latency */}
+                    <tr>
+                      <td className="py-2.5 px-3 font-medium text-slate-300">Avg Latency (avg_ms)</td>
+                      <td className="py-2.5 px-3 text-white font-bold">{Number(latestMilpSummary.avg_ms).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3 text-white">{Number(latestRrSummary.avg_ms).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3">
+                        {(() => {
+                          const diff = calcDiffPct(Number(latestMilpSummary.avg_ms), Number(latestRrSummary.avg_ms));
+                          const isBetter = diff <= 0;
+                          return (
+                            <span className={`font-bold ${isBetter ? "text-emerald-400" : "text-rose-400"}`}>
+                              {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
+                              {isBetter ? "(Faster)" : ""}
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className="py-3 px-3">
-                        <span className={isMilp ? "text-cyan-300 font-bold" : ""}>
-                          {m.cpu_stddev_mean.toFixed(2)}%
-                        </span>
+                    </tr>
+
+                    {/* p95 latency */}
+                    <tr>
+                      <td className="py-2.5 px-3 font-medium text-slate-300">P95 Latency (p95_ms)</td>
+                      <td className="py-2.5 px-3 text-white font-bold">{Number(latestMilpSummary.p95_ms).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3 text-white">{Number(latestRrSummary.p95_ms).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3">
+                        {(() => {
+                          const diff = calcDiffPct(Number(latestMilpSummary.p95_ms), Number(latestRrSummary.p95_ms));
+                          const isBetter = diff <= 0;
+                          return (
+                            <span className={`font-bold ${isBetter ? "text-emerald-400" : "text-rose-400"}`}>
+                              {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
+                              {isBetter ? "(Lower Tail Latency)" : ""}
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className="py-3 px-3">{m.peak_cpu_pct.toFixed(1)}%</td>
-                      <td className="py-3 px-3">{m.peak_mem_pct.toFixed(1)}%</td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded ${
-                            m.total_cap_violations === 0
-                              ? "bg-emerald-500/20 text-emerald-300 font-bold"
-                              : "bg-rose-500/20 text-rose-300 font-bold"
-                          }`}
-                        >
-                          {m.total_cap_violations}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className={isMilp ? "text-emerald-300 font-bold" : ""}>
-                          {m.mean_completion_latency_ms.toFixed(1)} ms
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className={isMilp ? "text-cyan-300 font-bold" : ""}>
-                          {m.p95_completion_latency_ms.toFixed(1)} ms
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">{m.mean_solver_latency_ms.toFixed(3)} ms</td>
-                      <td className="py-3 px-3">
-                        {isMilp ? (
-                          <span className="text-emerald-400 text-[11px] font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 inline" /> Optimal Multi-Resource Balance
+                    </tr>
+
+                    {/* failed requests */}
+                    <tr>
+                      <td className="py-2.5 px-3 font-medium text-slate-300">Failed Requests (failed)</td>
+                      <td className="py-2.5 px-3 text-white font-bold">{latestMilpSummary.failed}</td>
+                      <td className="py-2.5 px-3 text-white">{latestRrSummary.failed}</td>
+                      <td className="py-2.5 px-3">
+                        {Number(latestMilpSummary.failed) <= Number(latestRrSummary.failed) ? (
+                          <span className="text-emerald-400 font-bold">
+                            -{Number(latestRrSummary.failed) - Number(latestMilpSummary.failed)} fewer failures
                           </span>
                         ) : (
-                          <span className="text-slate-400 text-[11px]">
-                            Load-Blind Cyclic Baseline
+                          <span className="text-rose-400 font-bold">
+                            +{Number(latestMilpSummary.failed) - Number(latestRrSummary.failed)} failures
                           </span>
                         )}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+                    {/* busy-time std-dev */}
+                    <tr>
+                      <td className="py-2.5 px-3 font-medium text-slate-300">Busy-Time Std-Dev (busy_time_stddev)</td>
+                      <td className="py-2.5 px-3 text-white font-bold">{Number(latestMilpSummary.busy_time_stddev).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3 text-white">{Number(latestRrSummary.busy_time_stddev).toFixed(2)} ms</td>
+                      <td className="py-2.5 px-3">
+                        {(() => {
+                          const diff = calcDiffPct(Number(latestMilpSummary.busy_time_stddev), Number(latestRrSummary.busy_time_stddev));
+                          const isBetter = diff <= 0;
+                          return (
+                            <span className={`font-bold ${isBetter ? "text-emerald-400" : "text-amber-400"}`}>
+                              {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}{" "}
+                              {isBetter ? "(Fairer Distribution)" : ""}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+
+                    {/* throughput */}
+                    <tr>
+                      <td className="py-2.5 px-3 font-medium text-slate-300">Throughput (throughput_rps)</td>
+                      <td className="py-2.5 px-3 text-white font-bold">{Number(latestMilpSummary.throughput_rps).toFixed(2)} req/s</td>
+                      <td className="py-2.5 px-3 text-white">{Number(latestRrSummary.throughput_rps).toFixed(2)} req/s</td>
+                      <td className="py-2.5 px-3">
+                        {(() => {
+                          const diff = calcDiffPct(Number(latestMilpSummary.throughput_rps), Number(latestRrSummary.throughput_rps));
+                          return (
+                            <span className="text-slate-300 font-semibold">
+                              {diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {/* All Completed Test Summaries Table */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-mono uppercase text-slate-400 tracking-wider">
+                All Completed Test Summaries ({summaryRows.length} runs)
+              </h3>
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-left text-xs font-mono border-collapse">
+                  <thead>
+                    <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                      <th className="py-2 px-3">Test ID</th>
+                      <th className="py-2 px-3">Mode</th>
+                      <th className="py-2 px-3">Duration</th>
+                      <th className="py-2 px-3">Reqs</th>
+                      <th className="py-2 px-3">Failed</th>
+                      <th className="py-2 px-3">Avg Latency</th>
+                      <th className="py-2 px-3">P95 Latency</th>
+                      <th className="py-2 px-3">Busy StdDev</th>
+                      <th className="py-2 px-3">Throughput</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
+                    {summaryRows.map((r, i) => (
+                      <tr key={i} className="hover:bg-slate-800/40 transition">
+                        <td className="py-2 px-3 text-cyan-300">{r.test_id}</td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              r.mode === "milp"
+                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                                : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            }`}
+                          >
+                            {r.mode}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-slate-300">{r.duration_s}s</td>
+                        <td className="py-2 px-3 text-white">{r.requests}</td>
+                        <td
+                          className={`py-2 px-3 ${Number(r.failed) > 0 ? "text-rose-400 font-bold" : "text-emerald-400"}`}
+                        >
+                          {r.failed}
+                        </td>
+                        <td className="py-2 px-3 text-white">{Number(r.avg_ms).toFixed(1)} ms</td>
+                        <td className="py-2 px-3 text-white">{Number(r.p95_ms).toFixed(1)} ms</td>
+                        <td className="py-2 px-3 text-white">{Number(r.busy_time_stddev).toFixed(1)} ms</td>
+                        <td className="py-2 px-3 text-slate-300">
+                          {Number(r.throughput_rps).toFixed(1)} rps
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </>
-      ) : null}
+        )}
+      </div>
     </div>
   );
 };

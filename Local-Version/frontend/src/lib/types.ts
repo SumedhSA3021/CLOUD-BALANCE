@@ -26,6 +26,7 @@ export interface WorkerSnapshotItem {
   load_avg_1m: number;
   in_flight_cpu_pct: number;
   in_flight_mem_mb: number;
+  queue_length?: number;
 }
 
 export interface Assignment {

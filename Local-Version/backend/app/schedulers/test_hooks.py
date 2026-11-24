@@ -87,6 +87,11 @@ def start_test(
     # 1. Reset OR-Tools solver call count
     reset_solver_call_count()
 
+    # 1b. Reset live dispatch statistics
+    from app.core.live_stats import live_dispatch_tracker
+
+    live_dispatch_tracker.reset_current_test()
+
     # 2. Reset InFlightTracker in-memory
     if in_flight_tracker is not None:
         in_flight_tracker.clear()
