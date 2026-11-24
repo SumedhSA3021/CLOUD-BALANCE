@@ -113,25 +113,32 @@ class CSVTaskLogger:
                 item = None
 
             if batch:
-                with self._lock:
-                    self._ensure_file_header()
-                    with open(self._log_path, "a", newline="", encoding="utf-8") as f:
-                        writer = csv.DictWriter(f, fieldnames=TEST_LOG_COLUMNS, extrasaction="ignore")
-                        for row in batch:
-                            # Format floats cleanly
-                            formatted = {
-                                k: (
-                                    f"{v:.2f}"
-                                    if isinstance(v, float) and k in ("queue_ms", "exec_ms", "total_ms", "worker_cpu_pct_at_dispatch")
-                                    else str(v)
-                                )
-                                for k, v in row.items()
-                            }
-                            writer.writerow(formatted)
-                        f.flush()
-                for _ in range(len(batch)):
-                    self._queue.task_done()
-                batch.clear()
+                try:
+                    with self._lock:
+                        self._ensure_file_header()
+                        with open(self._log_path, "a", newline="", encoding="utf-8") as f:
+                            writer = csv.DictWriter(f, fieldnames=TEST_LOG_COLUMNS, extrasaction="ignore")
+                            for row in batch:
+                                # Format floats cleanly
+                                formatted = {
+                                    k: (
+                                        f"{v:.2f}"
+                                        if isinstance(v, float) and k in ("queue_ms", "exec_ms", "total_ms", "worker_cpu_pct_at_dispatch")
+                                        else str(v)
+                                    )
+                                    for k, v in row.items()
+                                }
+                                writer.writerow(formatted)
+                            f.flush()
+                except Exception as err:
+                    print(f"[!] CSV writer error: {err}")
+                finally:
+                    for _ in range(len(batch)):
+                        try:
+                            self._queue.task_done()
+                        except ValueError:
+                            pass
+                    batch.clear()
 
     def log_task(self, record: dict[str, Any]) -> None:
         """Asynchronously enqueue a task log record without slowing down dispatch."""
@@ -141,9 +148,11 @@ class CSVTaskLogger:
             # Drop or write synchronously if queue exhausted under extreme burst
             pass
 
-    def flush(self) -> None:
-        """Block until all queued records are written to disk."""
-        self._queue.join()
+    def flush(self, timeout: float = 2.0) -> None:
+        """Wait up to timeout seconds for queued records to be written to disk."""
+        deadline = time.time() + timeout
+        while not self._queue.empty() and time.time() < deadline:
+            time.sleep(0.01)
 
     def close(self) -> None:
         """Flush and stop background writer thread."""

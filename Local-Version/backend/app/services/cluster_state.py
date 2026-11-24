@@ -66,6 +66,18 @@ class ClusterStateService:
         workers.sort(key=lambda w: w.worker_id)
         return workers
 
+    async def get_worker(self, worker_id: str) -> Telemetry | None:
+        """Return Telemetry for a specific worker if active and not killed."""
+        raw = await self._redis.get(self.worker_key(worker_id))
+        if raw:
+            try:
+                t = Telemetry.model_validate_json(raw)
+                if t.worker_id not in self._killed_workers:
+                    return t
+            except Exception as exc:
+                logger.warning("invalid_worker_telemetry_json", key=worker_id, error=str(exc))
+        return None
+
     async def get_worker_snapshots(self) -> list[WorkerSnapshotItem]:
         """Return enriched WorkerSnapshotItems combining Redis telemetry + in-flight load."""
         workers = await self.get_active_workers()

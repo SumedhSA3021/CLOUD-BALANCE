@@ -95,6 +95,10 @@ class MicroBatcherService:
     def active_scheduler(self) -> BaseScheduler:
         return self._schedulers[self._active_scheduler_name]
 
+    def get_scheduler(self, name: str) -> BaseScheduler:
+        """Retrieve a scheduler instance by name (e.g. 'ortools_milp')."""
+        return self._schedulers.get(name, self.active_scheduler)
+
     @property
     def paused(self) -> bool:
         return self._paused
