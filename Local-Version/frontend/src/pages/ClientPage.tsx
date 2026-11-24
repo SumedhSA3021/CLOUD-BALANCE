@@ -287,17 +287,12 @@ export const ClientPage: React.FC = () => {
                   Current: {snapshot?.active_scheduler ?? "ortools_milp"}
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {[
                   {
                     id: "round_robin" as const,
                     label: "Round Robin",
                     desc: "Strict w1 ➔ w2 ➔ w3 cyclic",
-                  },
-                  {
-                    id: "least_connections" as const,
-                    label: "Least Connections",
-                    desc: "Fewest active tasks first",
                   },
                   {
                     id: "ortools_milp" as const,
@@ -327,9 +322,7 @@ export const ClientPage: React.FC = () => {
                         isActive
                           ? s.id === "round_robin"
                             ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 ring-1 ring-cyan-400/50 shadow-sm shadow-cyan-500/20"
-                            : s.id === "least_connections"
-                              ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 ring-1 ring-emerald-400/50 shadow-sm shadow-emerald-500/20"
-                              : "bg-purple-500/20 border-purple-400 text-purple-200 ring-1 ring-purple-400/50 shadow-sm shadow-purple-500/20"
+                            : "bg-purple-500/20 border-purple-400 text-purple-200 ring-1 ring-purple-400/50 shadow-sm shadow-purple-500/20"
                           : "bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700"
                       }`}
                     >

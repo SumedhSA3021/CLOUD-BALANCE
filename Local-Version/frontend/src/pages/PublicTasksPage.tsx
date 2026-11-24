@@ -500,7 +500,10 @@ export const PublicTasksPage: React.FC = () => {
                     Final SHA-256 Digest Hex
                   </span>
                   <p className="text-xs font-mono text-cyan-300 break-all select-all">
-                    {hashResult.result?.final_hash ?? "N/A"}
+                    {hashResult.result?.final_hash ??
+                      hashResult.result?.detail ??
+                      hashResult.result?.error ??
+                      "N/A"}
                   </p>
                 </div>
 

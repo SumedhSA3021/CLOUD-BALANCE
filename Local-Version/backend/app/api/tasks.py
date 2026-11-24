@@ -120,7 +120,13 @@ async def execute_task_contract(
                 )
                 for w in WORKERS
             ]
-        milp_sched = batcher.get_scheduler("ortools_milp")
+        if hasattr(batcher, "get_scheduler"):
+            milp_sched = batcher.get_scheduler("ortools_milp")
+        elif hasattr(batcher, "_schedulers") and "ortools_milp" in batcher._schedulers:
+            milp_sched = batcher._schedulers["ortools_milp"]
+        else:
+            milp_sched = batcher.active_scheduler
+
         try:
             profile = resolve_task_profile(t_type)
         except ValueError:
@@ -136,7 +142,8 @@ async def execute_task_contract(
             matrix_dim=profile.matrix_dim,
             mode="milp",
         )
-        assignments, _ = milp_sched.assign([task_obj], workers, record_in_flight=False)
+        milp_res = milp_sched.assign([task_obj], workers, record_in_flight=False)
+        assignments = milp_res.assignments if hasattr(milp_res, "assignments") else milp_res[0]
         assigned_worker = assignments.get(task_id, workers[0].worker_id)
         dispatch_seq = "none"
         scheduler_used = "ortools_milp"
@@ -149,7 +156,11 @@ async def execute_task_contract(
     await redis_client.incr(f"inflight:{assigned_worker}")
     await redis_client.incr(f"cluster:inflight:{assigned_worker}")
 
-    worker_snap = await cluster_state.get_worker(assigned_worker)
+    if hasattr(cluster_state, "get_worker"):
+        worker_snap = await cluster_state.get_worker(assigned_worker)
+    else:
+        active_list = await cluster_state.get_active_workers()
+        worker_snap = next((w for w in active_list if w.worker_id == assigned_worker), None)
     worker_cpu_pct_at_dispatch = worker_snap.cpu_percent if worker_snap else 10.0
 
     # 4. Forward to the worker
@@ -218,6 +229,12 @@ async def execute_task_contract(
     except httpx.TimeoutException:
         worker_status = "timeout"
         result = {"status": "timeout", "detail": "Gateway timeout contacting worker"}
+    except (httpx.ConnectError, httpx.NetworkError):
+        worker_status = "unavailable"
+        result = {
+            "status": "unavailable",
+            "detail": f"Worker {assigned_worker} offline or unreachable on port {worker_port}",
+        }
     except Exception as exc:
         worker_status = "error"
         result = {"error": str(exc)}

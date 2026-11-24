@@ -96,6 +96,10 @@ class MicroBatcherService:
         return self._schedulers[self._active_scheduler_name]
 
     def get_scheduler(self, name: str) -> BaseScheduler:
+        """Get a scheduler instance by name, falling back to active scheduler."""
+        return self._schedulers.get(name, self.active_scheduler)
+
+    def get_scheduler(self, name: str) -> BaseScheduler:
         """Retrieve a scheduler instance by name (e.g. 'ortools_milp')."""
         return self._schedulers.get(name, self.active_scheduler)
 

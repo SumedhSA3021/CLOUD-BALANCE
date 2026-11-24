@@ -94,6 +94,19 @@ class ClusterStateService:
             )
         return snapshots
 
+    async def get_worker(self, worker_id: str) -> Telemetry | None:
+        """Fetch telemetry for a specific worker by ID."""
+        raw = await self._redis.get(self.worker_key(worker_id))
+        if not raw:
+            return None
+        try:
+            t = Telemetry.model_validate_json(raw)
+            if t.worker_id in self._killed_workers:
+                return None
+            return t
+        except Exception:
+            return None
+
     async def evict_worker(self, worker_id: str) -> None:
         """Immediately remove a failed worker's key from Redis for instant failover."""
         await self._redis.delete(self.worker_key(worker_id))

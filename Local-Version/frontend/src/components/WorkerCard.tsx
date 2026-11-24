@@ -47,7 +47,6 @@ export const WorkerCard: React.FC<WorkerCardProps> = ({
 
   // Dynamic styling when this worker is the latest to receive load
   const isRoundRobin = activeScheduler === "round_robin";
-  const isLeastConn = activeScheduler === "least_connections";
 
   let containerHighlightClass =
     "border-slate-800 bg-slate-900/90 hover:border-slate-700";
@@ -55,9 +54,6 @@ export const WorkerCard: React.FC<WorkerCardProps> = ({
     if (isRoundRobin) {
       containerHighlightClass =
         "border-cyan-400 ring-2 ring-cyan-400/80 shadow-[0_0_25px_rgba(34,211,238,0.25)] bg-gradient-to-b from-cyan-950/30 via-slate-900/95 to-slate-900/95";
-    } else if (isLeastConn) {
-      containerHighlightClass =
-        "border-emerald-400 ring-2 ring-emerald-400/80 shadow-[0_0_25px_rgba(16,185,129,0.25)] bg-gradient-to-b from-emerald-950/30 via-slate-900/95 to-slate-900/95";
     } else {
       containerHighlightClass =
         "border-purple-400 ring-2 ring-purple-400/80 shadow-[0_0_25px_rgba(168,85,247,0.25)] bg-gradient-to-b from-purple-950/30 via-slate-900/95 to-slate-900/95";
@@ -76,46 +72,32 @@ export const WorkerCard: React.FC<WorkerCardProps> = ({
           className={`flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-mono border ${
             isRoundRobin
               ? "bg-cyan-500/20 border-cyan-400/50 text-cyan-300"
-              : isLeastConn
-                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300"
-                : "bg-purple-500/20 border-purple-400/50 text-purple-300"
+              : "bg-purple-500/20 border-purple-400/50 text-purple-300"
           }`}
         >
           <div className="flex items-center gap-1.5 font-bold">
             <span className="relative flex h-2 w-2">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isRoundRobin
-                    ? "bg-cyan-400"
-                    : isLeastConn
-                      ? "bg-emerald-400"
-                      : "bg-purple-400"
+                  isRoundRobin ? "bg-cyan-400" : "bg-purple-400"
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-2 w-2 ${
-                  isRoundRobin
-                    ? "bg-cyan-400"
-                    : isLeastConn
-                      ? "bg-emerald-400"
-                      : "bg-purple-400"
+                  isRoundRobin ? "bg-cyan-400" : "bg-purple-400"
                 }`}
               />
             </span>
             <span>
               {isRoundRobin
                 ? "LOAD RECEIVED (Round Robin)"
-                : isLeastConn
-                  ? "LOAD RECEIVED (Least Connections)"
-                  : "LOAD RECEIVED (MILP Minimax)"}
+                : "LOAD RECEIVED (MILP Minimax)"}
             </span>
           </div>
           <span className="text-[10px] uppercase tracking-wide opacity-90">
             {isRoundRobin
               ? "Cyclic Pointer Turn"
-              : isLeastConn
-                ? `Min Active (${worker.active_tasks} Tasks)`
-                : "Optimal Placement"}
+              : "Optimal Placement"}
           </span>
         </div>
       )}
