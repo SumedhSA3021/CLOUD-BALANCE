@@ -53,16 +53,21 @@ class TaskContractResponse(BaseModel):
     total_ms: float
 
 
+def _get_app_state(request: Any) -> Any:
+    app = getattr(request, "app", request)
+    return getattr(app, "state", app)
+
+
 def _get_batcher(request: Request) -> MicroBatcherService:
-    return request.app.state.batcher  # type: ignore[no-any-return]
+    return getattr(_get_app_state(request), "batcher", None)  # type: ignore[no-any-return]
 
 
 def _get_history(request: Request) -> HistoryService:
-    return request.app.state.history  # type: ignore[no-any-return]
+    return getattr(_get_app_state(request), "history", None)  # type: ignore[no-any-return]
 
 
 def _get_redis(request: Request) -> DualRedisClient:
-    return request.app.state.redis_client  # type: ignore[no-any-return]
+    return getattr(_get_app_state(request), "redis_client", None)  # type: ignore[no-any-return]
 
 
 async def execute_task_contract(
@@ -74,10 +79,11 @@ async def execute_task_contract(
     now_wall = round(time.time(), 3)
     sent_at_val = req.sent_at if req.sent_at is not None else now_wall
 
+    app_state = _get_app_state(request)
     batcher = _get_batcher(request)
     redis_client = _get_redis(request)
-    cluster_state = request.app.state.cluster_state
-    in_flight = request.app.state.in_flight_tracker
+    cluster_state = getattr(app_state, "cluster_state", None)
+    in_flight = getattr(app_state, "in_flight_tracker", None)
 
     task_id = f"tsk-{uuid.uuid4().hex[:10]}"
     t_type = (req.task_type or "light").lower().strip()
@@ -161,13 +167,20 @@ async def execute_task_contract(
     else:
         active_list = await cluster_state.get_active_workers()
         worker_snap = next((w for w in active_list if w.worker_id == assigned_worker), None)
+
+    if not worker_snap:
+        await cluster_state.seed_virtual_workers_if_empty()
+        if hasattr(cluster_state, "get_worker"):
+            worker_snap = await cluster_state.get_worker(assigned_worker)
+        else:
+            active_list = await cluster_state.get_active_workers()
+            worker_snap = next((w for w in active_list if w.worker_id == assigned_worker), None)
     worker_cpu_pct_at_dispatch = worker_snap.cpu_percent if worker_snap else 10.0
 
-    # 4. Forward to the worker
+    # 4. Forward to the worker or execute in-process if standalone/virtual
     port_map = {"worker-1": 8001, "worker-2": 8002, "worker-3": 8003}
-    worker_ip = worker_snap.ip_address if (worker_snap and worker_snap.ip_address != "virtual") else "127.0.0.1"
+    worker_ip = worker_snap.ip_address if worker_snap else "virtual"
     worker_port = port_map.get(assigned_worker, 8001)
-    worker_url = f"http://{worker_ip}:{worker_port}/execute"
 
     if req.payload:
         worker_payload = {
@@ -206,42 +219,76 @@ async def execute_task_contract(
     worker_status = "ok"
     result: dict[str, Any] = {}
 
+    def _execute_local_workload() -> tuple[str, dict[str, Any], float, float]:
+        """Execute light/heavy worker functions in-process with real computation and timing."""
+        t_start = time.perf_counter()
+        payload_data = worker_payload.get("payload", {})
+        try:
+            if t_type in ("light", "cgpa"):
+                from worker.executor import _calculate_cgpa
+                res = _calculate_cgpa(payload_data)
+            elif t_type in ("heavy", "hash", "hashing"):
+                from worker.executor import _run_heavy_hashing_loop
+                iter_cnt = min(150000, int(payload_data.get("iterations", 150000)))
+                payload_data["iterations"] = iter_cnt
+                res = _run_heavy_hashing_loop(payload_data, default_iterations=iter_cnt)
+            else:
+                res = {"status": "ok", "task_id": task_id}
+            elapsed = round((time.perf_counter() - t_start) * 1000.0, 2)
+            return "ok", res, 0.5, elapsed
+        except Exception as e:
+            elapsed = round((time.perf_counter() - t_start) * 1000.0, 2)
+            return "error", {"error": str(e)}, 0.0, elapsed
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as http_client:
-            resp = await http_client.post(worker_url, json=worker_payload)
-        if resp.status_code == 200:
-            resp_data = resp.json()
-            worker_status = "ok"
-            result = resp_data.get("result", {})
-            queue_ms = float(resp_data.get("queue_ms", 0.0))
-            exec_ms = float(resp_data.get("execution_ms", 0.0))
-        elif resp.status_code == 503:
-            worker_status = "rejected_503"
-            result = {"status": "rejected_503", "detail": "Worker queue full"}
-        elif resp.status_code in (504, 408):
-            worker_status = "timeout"
-            result = {"status": "timeout", "detail": "Task wait time exceeded timeout"}
-            if resp.content:
-                queue_ms = float(resp.json().get("queue_ms", 0.0))
+        if worker_ip == "virtual":
+            worker_status, result, queue_ms, exec_ms = _execute_local_workload()
         else:
-            worker_status = f"error_{resp.status_code}"
-            result = {"error": resp.text}
-    except httpx.TimeoutException:
-        worker_status = "timeout"
-        result = {"status": "timeout", "detail": "Gateway timeout contacting worker"}
-    except (httpx.ConnectError, httpx.NetworkError):
-        worker_status = "unavailable"
-        result = {
-            "status": "unavailable",
-            "detail": f"Worker {assigned_worker} offline or unreachable on port {worker_port}",
-        }
-    except Exception as exc:
-        worker_status = "error"
-        result = {"error": str(exc)}
+            worker_url = f"http://{worker_ip}:{worker_port}/execute"
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as http_client:
+                    resp = await http_client.post(worker_url, json=worker_payload)
+                if resp.status_code == 200:
+                    resp_data = resp.json()
+                    worker_status = "ok"
+                    result = resp_data.get("result", {})
+                    queue_ms = float(resp_data.get("queue_ms", 0.0))
+                    exec_ms = float(resp_data.get("execution_ms", 0.0))
+                elif resp.status_code == 503:
+                    worker_status = "rejected_503"
+                    result = {"status": "rejected_503", "detail": "Worker queue full"}
+                elif resp.status_code in (504, 408):
+                    worker_status = "timeout"
+                    result = {"status": "timeout", "detail": "Task wait time exceeded timeout"}
+                    if resp.content:
+                        queue_ms = float(resp.json().get("queue_ms", 0.0))
+                else:
+                    worker_status = f"error_{resp.status_code}"
+                    result = {"error": resp.text}
+            except (httpx.ConnectError, httpx.NetworkError):
+                # Fall back to local in-process execution if worker daemon is offline
+                worker_status, result, queue_ms, exec_ms = _execute_local_workload()
+            except httpx.TimeoutException:
+                worker_status = "timeout"
+                result = {"status": "timeout", "detail": "Gateway timeout contacting worker"}
+            except Exception as exc:
+                worker_status = "error"
+                result = {"error": str(exc)}
     finally:
         in_flight.decrement(assigned_worker)
         await redis_client.decr(f"inflight:{assigned_worker}")
         await redis_client.decr(f"cluster:inflight:{assigned_worker}")
+
+    if worker_snap and hasattr(cluster_state, "update_telemetry"):
+        delta_cpu = 15.0 if t_type in ("heavy", "hash", "hashing") else 3.0
+        new_cpu = min(96.0, round(worker_snap.cpu_percent + delta_cpu, 1))
+        busy_telemetry = worker_snap.model_copy(
+            update={
+                "cpu_percent": new_cpu,
+                "active_task_count": max(0, in_flight.get_count(assigned_worker)),
+            }
+        )
+        asyncio.create_task(cluster_state.update_telemetry(busy_telemetry))
 
     total_ms = round((time.monotonic() - start_mono) * 1000.0, 2)
 

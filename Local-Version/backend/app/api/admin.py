@@ -291,7 +291,7 @@ async def admin_start_test(
     _auth: None = Depends(verify_admin_token),
 ) -> dict[str, Any]:
     """Start an automated benchmark test (armed -> running -> draining -> idle)."""
-    return await test_manager.start(payload, request.app.state)
+    return await test_manager.start(payload, request.app)
 
 
 @admin_router.post("/test/stop", response_model=TestStatusResponse)

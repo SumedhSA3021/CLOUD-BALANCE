@@ -51,7 +51,13 @@ class AppProxyRequest:
     """Minimal request proxy carrying app.state for internal task dispatch."""
 
     def __init__(self, app: Any) -> None:
-        self.app = app
+        if hasattr(app, "state"):
+            self.app = app
+        else:
+            class _AppWrapper:
+                def __init__(self, st: Any) -> None:
+                    self.state = st
+            self.app = _AppWrapper(app)
 
 
 class InternalLoadSimulator:
