@@ -73,7 +73,7 @@ class CSVTaskLogger:
         self._log_path = log_path
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=100000)
         self._shutdown_event = threading.Event()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ensure_file_header()
 
         self._thread = threading.Thread(target=self._writer_loop, daemon=True, name="csv-task-logger")
@@ -148,10 +148,10 @@ class CSVTaskLogger:
             # Drop or write synchronously if queue exhausted under extreme burst
             pass
 
-    def flush(self, timeout: float = 2.0) -> None:
-        """Wait up to timeout seconds for queued records to be written to disk."""
+    def flush(self, timeout: float = 3.0) -> None:
+        """Wait until all queued records are written to disk, with safety timeout."""
         deadline = time.time() + timeout
-        while not self._queue.empty() and time.time() < deadline:
+        while self._queue.unfinished_tasks > 0 and time.time() < deadline:
             time.sleep(0.01)
 
     def close(self) -> None:

@@ -180,8 +180,14 @@ class ActiveTestManager:
             # Cancel internal simulator if running
             await simulator_manager.stop()
 
-            if self._lifecycle_task and not self._lifecycle_task.done():
-                self._lifecycle_task.cancel()
+            task = self._lifecycle_task
+            self._lifecycle_task = None
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
             self._finalize()
             return self.get_status()
@@ -241,20 +247,16 @@ class ActiveTestManager:
 
     def _finalize(self) -> None:
         """Write summary row to test_summary.csv and transition back to idle."""
-        if self.test_id:
-            try:
-                write_test_summary(
-                    test_id=self.test_id,
-                    mode=self.mode or "milp",
-                    seed=self.seed or 0,
-                    duration_s=self.duration_s or 0.0,
-                    lambda_per_client=self.lambda_per_client or 0.0,
-                    heavy_ratio=self.heavy_ratio or 0.0,
-                )
-            except Exception as e:
-                logger.error("test_summary_write_error", error=str(e))
+        if self.state == TestState.IDLE:
+            return
 
-        end_test()
+        tid = self.test_id
+        mode = self.mode or "milp"
+        seed = self.seed or 0
+        dur = self.duration_s or 0.0
+        lam = self.lambda_per_client or 0.0
+        hr = self.heavy_ratio or 0.0
+
         self.state = TestState.IDLE
         self.test_id = None
         self.mode = None
@@ -264,6 +266,20 @@ class ActiveTestManager:
         self.lambda_per_client = None
         self.heavy_ratio = None
         self._lifecycle_task = None
+        end_test()
+
+        if tid:
+            try:
+                write_test_summary(
+                    test_id=tid,
+                    mode=mode,
+                    seed=seed,
+                    duration_s=dur,
+                    lambda_per_client=lam,
+                    heavy_ratio=hr,
+                )
+            except Exception as e:
+                logger.error("test_summary_write_error", error=str(e))
 
 
 test_manager = ActiveTestManager()
