@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
@@ -34,10 +35,31 @@ class InFlightReservation:
 
 
 class InFlightTracker:
-    """Tracks in-flight task reservations per worker with time-based decay."""
+    """Tracks in-flight task reservations per worker with time-based decay and atomic counters."""
 
     def __init__(self) -> None:
         self._reservations: dict[str, InFlightReservation] = {}
+        self._worker_counts: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def increment(self, worker_id: str) -> int:
+        """Increment in-flight counter for worker_id under lock and return new count."""
+        with self._lock:
+            val = self._worker_counts.get(worker_id, 0) + 1
+            self._worker_counts[worker_id] = val
+            return val
+
+    def decrement(self, worker_id: str) -> int:
+        """Decrement in-flight counter for worker_id under lock and return new count."""
+        with self._lock:
+            val = max(0, self._worker_counts.get(worker_id, 0) - 1)
+            self._worker_counts[worker_id] = val
+            return val
+
+    def get_count(self, worker_id: str) -> int:
+        """Return raw active in-flight count for worker_id."""
+        with self._lock:
+            return max(0, self._worker_counts.get(worker_id, 0))
 
     def _prune(self, now_mono: float) -> None:
         expired = [
@@ -82,8 +104,10 @@ class InFlightTracker:
             self._reservations.pop(tid, None)
 
     def clear(self) -> None:
-        """Clear all reservations."""
-        self._reservations.clear()
+        """Clear all reservations and worker counters."""
+        with self._lock:
+            self._reservations.clear()
+            self._worker_counts.clear()
 
     def get_worker_in_flight(
         self,

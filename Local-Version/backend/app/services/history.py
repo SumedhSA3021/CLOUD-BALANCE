@@ -54,17 +54,19 @@ class HistoryService:
         status: str,
         execution_ms: float = 0.0,
         assigned_worker_id: str | None = None,
+        worker_inflight_at_dispatch: int | None = None,
     ) -> Assignment | None:
         """Create updated immutable Assignment copy in ring buffer upon completion/failover."""
         for idx, existing in enumerate(self._recent_assignments):
             if existing.task_id == task_id:
-                updated = existing.model_copy(
-                    update={
-                        "status": status,
-                        "execution_ms": round(execution_ms, 2),
-                        "assigned_worker_id": assigned_worker_id or existing.assigned_worker_id,
-                    }
-                )
+                upd_dict = {
+                    "status": status,
+                    "execution_ms": round(execution_ms, 2),
+                    "assigned_worker_id": assigned_worker_id or existing.assigned_worker_id,
+                }
+                if worker_inflight_at_dispatch is not None:
+                    upd_dict["worker_inflight_at_dispatch"] = worker_inflight_at_dispatch
+                updated = existing.model_copy(update=upd_dict)
                 self._recent_assignments[idx] = updated
                 return updated
         return None

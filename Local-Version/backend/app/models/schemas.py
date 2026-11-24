@@ -263,6 +263,7 @@ class Assignment(BaseModel):
     scheduler: str
     scheduler_used: str = ""
     dispatch_seq: int | None = None
+    worker_inflight_at_dispatch: int | None = None
     solver_latency_ms: float = 0.0
     queue_wait_ms: float = 0.0
     execution_ms: float = 0.0

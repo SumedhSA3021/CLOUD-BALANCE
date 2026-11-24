@@ -167,14 +167,22 @@ class DispatcherService:
             mem_demand_mb=task.mem_demand_mb,
         )
 
+        worker_inflight_at_dispatch = scheduler.in_flight.increment(initial_worker.worker_id)
+        logger.info(
+            "task_dispatch_started",
+            task_id=task.task_id,
+            worker_id=initial_worker.worker_id,
+            worker_inflight_at_dispatch=worker_inflight_at_dispatch,
+        )
+
         try:
             exec_ms = await self._post_to_worker(initial_worker, payload)
-            scheduler.in_flight.release(task.task_id)
             updated = self._history.update_assignment_status(
                 task_id=task.task_id,
                 status="COMPLETED",
                 execution_ms=exec_ms,
                 assigned_worker_id=initial_worker.worker_id,
+                worker_inflight_at_dispatch=worker_inflight_at_dispatch,
             )
             await self._history.sync_assignment_to_redis(updated)
             logger.info(
@@ -182,6 +190,7 @@ class DispatcherService:
                 task_id=task.task_id,
                 client_id=task.client_id,
                 worker_id=initial_worker.worker_id,
+                worker_inflight_at_dispatch=worker_inflight_at_dispatch,
                 execution_ms=exec_ms,
             )
             return initial_worker.worker_id, "COMPLETED", exec_ms
@@ -190,10 +199,10 @@ class DispatcherService:
                 "worker_dispatch_failed_triggering_failover",
                 task_id=task.task_id,
                 failed_worker=initial_worker.worker_id,
+                worker_inflight_at_dispatch=worker_inflight_at_dispatch,
                 error=str(exc),
             )
-            # Release reservation on failed worker and evict from Redis cluster state
-            scheduler.in_flight.release(task.task_id)
+            # Evict from Redis cluster state
             await self._cluster_state.evict_worker(initial_worker.worker_id)
 
             # Re-solve excluding the failed worker
@@ -209,6 +218,7 @@ class DispatcherService:
                     status="FAILED",
                     execution_ms=0.0,
                     assigned_worker_id=initial_worker.worker_id,
+                    worker_inflight_at_dispatch=worker_inflight_at_dispatch,
                 )
                 return initial_worker.worker_id, "FAILED", 0.0
 
@@ -218,14 +228,15 @@ class DispatcherService:
                 (w for w in remaining if w.worker_id == new_worker_id),
                 remaining[0],
             )
+            new_inflight = scheduler.in_flight.increment(new_worker.worker_id)
             try:
                 exec_ms = await self._post_to_worker(new_worker, payload)
-                scheduler.in_flight.release(task.task_id)
                 updated = self._history.update_assignment_status(
                     task_id=task.task_id,
                     status="COMPLETED",
                     execution_ms=exec_ms,
                     assigned_worker_id=new_worker.worker_id,
+                    worker_inflight_at_dispatch=new_inflight,
                 )
                 await self._history.sync_assignment_to_redis(updated)
                 logger.info(
@@ -233,10 +244,10 @@ class DispatcherService:
                     task_id=task.task_id,
                     from_worker=initial_worker.worker_id,
                     to_worker=new_worker.worker_id,
+                    worker_inflight_at_dispatch=new_inflight,
                 )
                 return new_worker.worker_id, "COMPLETED", exec_ms
             except Exception as exc2:
-                scheduler.in_flight.release(task.task_id)
                 logger.error(
                     "worker_failover_exhausted",
                     task_id=task.task_id,
@@ -247,7 +258,13 @@ class DispatcherService:
                     status="FAILED",
                     execution_ms=0.0,
                     assigned_worker_id=new_worker.worker_id,
+                    worker_inflight_at_dispatch=new_inflight,
                 )
                 await self._history.sync_assignment_to_redis(updated_fail)
                 return new_worker.worker_id, "FAILED", 0.0
+            finally:
+                scheduler.in_flight.decrement(new_worker.worker_id)
+        finally:
+            scheduler.in_flight.decrement(initial_worker.worker_id)
+            scheduler.in_flight.release(task.task_id)
 

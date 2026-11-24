@@ -168,9 +168,13 @@ class ORToolsMILPScheduler(BaseScheduler):
         total_mems: list[float] = []
 
         for w in workers:
-            if_cpu, if_mem, _ = self.in_flight.get_worker_in_flight(w.worker_id, now_mono)
-            base_cpus.append(float(w.cpu_percent) + if_cpu)
-            base_mems.append(float(w.memory_used_mb) + if_mem)
+            if_cpu, if_mem, if_cnt = self.in_flight.get_worker_in_flight(w.worker_id, now_mono)
+            inflight_count = max(if_cnt, self.in_flight.get_count(w.worker_id))
+            inflight_load = max(if_cpu, float(inflight_count) * 12.0)
+            queue_load = min(10.0, float(w.active_task_count) * 1.5)
+
+            base_cpus.append(float(w.cpu_percent) + inflight_load + queue_load)
+            base_mems.append(float(w.memory_used_mb) + if_mem + (float(inflight_count) * 128.0))
             total_mems.append(max(1.0, float(w.memory_total_mb)))
 
         if num_tasks == 0:
