@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudBalance — Member-wise Task Plan</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--text:#18202f;--muted:#5d6779;--line:#e2e6ef;--ac:#2563eb;--soft:#eef2fb;--code:#eceff7;--ok:#0f766e}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1220;--card:#151c2e;--text:#e6e9f2;--muted:#98a2b9;--line:#26304a;--ac:#6b9bff;--soft:#1b2540;--code:#1f2842;--ok:#5eead4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15.5px/1.6 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+header{background:linear-gradient(135deg,#1e3a8a,#2563eb 60%,#0ea5e9);color:#fff;padding:40px 20px 34px}
+.w{max-width:1000px;margin:0 auto}
+header h1{margin:4px 0 8px;font-size:clamp(24px,4vw,34px);line-height:1.2}
+header p{margin:0;opacity:.92;max-width:720px}
+.eb{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85}
+nav{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+nav .w{display:flex;gap:4px;padding:8px 14px}
+nav a{padding:6px 12px;border-radius:8px;color:var(--text);text-decoration:none;font-size:14px}
+nav a:hover{background:var(--soft)}
+main{padding:24px 16px 56px}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:20px;scroll-margin-top:56px}
+h2{margin:0 0 12px;font-size:20px}h3{margin:16px 0 8px;font-size:16px;color:var(--ac)}
+p{margin:0 0 10px}ul{margin:0 0 10px;padding-left:20px}li{margin-bottom:4px}
+code{background:var(--code);padding:1px 6px;border-radius:5px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+.dg{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px;overflow-x:auto;text-align:center;margin:10px 0}
+.sc{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+th{background:var(--soft);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--text);padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:14px}
+.tab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.role{color:var(--muted);margin:0 0 12px}
+.task{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)}
+.task h4{margin:0 0 6px;font-size:15px;display:flex;gap:10px;align-items:flex-start}
+.task h4 label{display:flex;gap:10px;cursor:pointer;align-items:flex-start}
+.tid{background:var(--ac);color:#fff;border-radius:6px;padding:0 7px;font-size:12px;line-height:22px;flex:none}
+.task.done{opacity:.6}.task.done h4 span.t{text-decoration:line-through}
+.meta{font-size:13px;color:var(--muted);margin:2px 0 6px}
+.dn{font-size:13.5px;color:var(--ok);font-weight:600}
+.bar{height:8px;background:var(--soft);border-radius:6px;overflow:hidden;margin:8px 0 14px}
+.bar div{height:100%;background:var(--ok);width:0;transition:width .3s}
+.ph{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.ph div{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:14px}
+.ph b{display:block;color:var(--ac);margin-bottom:4px}
+</style>
+</head>
+<body>
+<header><div class="w">
+  <div class="eb">Team Plan · CloudBalance upgrade</div>
+  <h1>Member-wise Tasks &amp; Workflow</h1>
+  <p>Public entry point → controller → MILP / Round Robin → 3 worker VMs, with every request logged to CSV as proof of a fair test.</p>
+</div></header>
+<nav><div class="w"><a href="#flow">Workflow</a><a href="#fix">Scheduler fix</a><a href="#test">Test lifecycle</a><a href="#members">Member tasks</a><a href="#contract">Shared contract</a><a href="#order">Build order</a><a href="#fair">Fair test</a></div></nav>
+
+<main><div class="w">
+
+<section id="flow">
+  <h2>1. How one request travels</h2>
+  <div class="dg"><pre class="mermaid">
+flowchart LR
+    C["Client: web page or laptop-1/2/3 script"] --> N["Nginx :80"]
+    N --> F["FastAPI controller"]
+    F --> S{"Scheduler mode"}
+    S -->|"milp"| M["MILP picks least-loaded worker"]
+    S -->|"round_robin"| R["Next worker in cycle"]
+    M --> W["Worker 1 / 2 / 3"]
+    R --> W
+    W --> F
+    F --> L[("CSV: test_log.csv")]
+    F --> C
+  </pre></div>
+  <p>Only the scheduler box differs between the two tests. Everything else is the same code path.</p>
+</section>
+
+<section id="fix">
+  <h2>2. The Round Robin bug fix (dispatch logic)</h2>
+  <div class="dg"><pre class="mermaid">
+flowchart TD
+    T["Task arrives"] --> Q{"Read mode once: task.mode"}
+    Q -->|"round_robin"| R["n = Redis INCR rr_counter<br/>worker = W[(n-1) mod 3]<br/>dispatch_seq = n"]
+    Q -->|"milp"| B["Micro-batch buffer"] --> O["OR-Tools MILP solve<br/>uses in-flight counts"]
+    R --> S["Send to worker"]
+    O --> S
+    S --> G["Log scheduler_used + dispatch_seq"]
+  </pre></div>
+  <ul>
+    <li>Round Robin never enters the batch loop or the solver, so MILP can no longer decide in RR mode.</li>
+    <li>One global atomic counter means order is w1, w2, w3, w1... no matter which laptop sent the task.</li>
+    <li>Mode is locked while a test is running; counters reset at test start.</li>
+  </ul>
+</section>
+
+<section id="test">
+  <h2>3. Test lifecycle</h2>
+  <div class="dg"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> idle
+    idle --> armed: Admin Start (mode, duration, seed)
+    armed --> running: start_at reached (5s sync)
+    running --> draining: duration ends or Stop
+    draining --> idle: summary row written
+  </pre></div>
+  <p>Run MILP test → rest about 3 minutes → run Round Robin test with identical parameters. Laptops poll <code>/test/status</code>, wait for <code>armed</code>, then all start together at <code>start_at</code>.</p>
+</section>
+
+<section id="members">
+  <h2>4. Member-wise tasks</h2>
+  <p class="meta">Tick tasks as you finish them (progress saves in this browser). Edit the <code>members</code> names at the top of the script to match your team.</p>
+  <div class="tabs" id="tabs"></div>
+  <div id="panel"></div>
+</section>
+
+<section id="contract">
+  <h2>5. Shared contract (agree on this before coding)</h2>
+  <div class="sc"><table>
+    <tr><th>Item</th><th>Value</th><th>Owner</th></tr>
+    <tr><td>Redis keys</td><td><code>sched_mode</code>, <code>rr_counter</code>, in-flight counters per worker</td><td>Optimization core</td></tr>
+    <tr><td>Test endpoints</td><td><code>POST /admin/test/start</code>, <code>POST /admin/test/stop</code>, <code>GET /test/status</code></td><td>Backend</td></tr>
+    <tr><td>Start body</td><td><code>mode, duration_s, lambda_per_client, heavy_ratio, seed</code></td><td>Backend</td></tr>
+    <tr><td>Status response</td><td><code>state, test_id, mode, start_at, duration_s, seed, lambda_per_client, heavy_ratio</code></td><td>Backend</td></tr>
+    <tr><td>Task request</td><td><code>client_id, task_type (light|heavy), size, sent_at</code></td><td>Backend / Client</td></tr>
+    <tr><td>Task response</td><td><code>result, assigned_worker, queue_ms, exec_ms, total_ms</code></td><td>Backend</td></tr>
+    <tr><td><code>test_log.csv</code></td><td>test_id, mode, seed, duration_s, lambda_per_client, heavy_ratio, client_id, task_id, task_type, sent_at, scheduler_used, dispatch_seq, assigned_worker, worker_inflight_at_dispatch, worker_cpu_pct_at_dispatch, queue_ms, exec_ms, total_ms, status</td><td>Backend</td></tr>
+    <tr><td><code>test_summary.csv</code></td><td>test_id, mode, seed, duration_s, lambda_per_client, heavy_ratio, requests, failed, avg_ms, p50_ms, p95_ms, max_ms, max_queue_ms, throughput_rps, worker1/2/3_busy_ms, busy_time_stddev</td><td>Backend</td></tr>
+    <tr><td>Worker</td><td>port 8001, status values <code>ok | timeout | rejected_503</code></td><td>Worker / Infra</td></tr>
+  </table></div>
+</section>
+
+<section id="order">
+  <h2>6. Build order</h2>
+  <div class="ph">
+    <div><b>Phase 1 · parallel, local</b>A1, A2, B1, B2, C1, C3, D2</div>
+    <div><b>Phase 2 · integrate</b>A3, C2, C4, D1, D3</div>
+    <div><b>Phase 3 · results UI</b>D4, A4 (tests)</div>
+    <div><b>Phase 4 · cloud</b>B3, B4, deploy, check from phones</div>
+    <div><b>Phase 5 · final tests</b>30s dry run each mode, then real 60s MILP, 3 min rest, 60s Round Robin</div>
+  </div>
+  <p class="meta" style="margin-top:10px">Develop everything locally first (1 controller + 3 local worker processes), then move to GCP.</p>
+</section>
+
+<section id="fair">
+  <h2>7. What makes the test fair</h2>
+  <div class="sc"><table>
+    <tr><th>Parameter</th><th>MILP test</th><th>Round Robin test</th></tr>
+    <tr><td>Scheduler</td><td>MILP</td><td><b>Round Robin</b> (only change)</td></tr>
+    <tr><td>Duration</td><td>60s</td><td>60s</td></tr>
+    <tr><td>Rate per laptop (λ)</td><td>3/s</td><td>3/s</td></tr>
+    <tr><td>Task mix</td><td>70% light, 30% heavy</td><td>70% light, 30% heavy</td></tr>
+    <tr><td>Seed</td><td>42 (+ laptop no.)</td><td>42 (+ laptop no.)</td></tr>
+    <tr><td>Laptops / Workers</td><td>3 / same 3 VMs</td><td>3 / same 3 VMs</td></tr>
+    <tr><td>Rest before test</td><td>about 3 min</td><td>about 3 min</td></tr>
+  </table></div>
+  <p class="meta" style="margin-top:10px">All of these are saved in every CSV row, so reviewers can verify the test was legitimate. Download both CSVs before stopping the VMs.</p>
+</section>
+
+</div></main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+var members=[
+{n:"Sumedh",r:"Optimization Core (Module 2): scheduler logic and correctness",t:[
+ {id:"A1",t:"Round Robin isolation fix",f:"Existing controller dispatch / scheduler file",c:["Read sched_mode once per task at arrival, store as task.mode","RR: n = redis INCR rr_counter; worker = WORKERS[(n-1) % 3]; set dispatch_seq = n; send directly","RR must bypass the micro-batch buffer and the MILP solver","Only milp tasks enter the batch loop"],d:"RR rows in the log cycle w1, w2, w3 strictly; solver call count is 0 in RR."},
+ {id:"A2",t:"MILP in-flight counter",f:"Scheduler + dispatch",c:["Per-worker in-flight counter, incremented under a lock at dispatch, decremented on completion","MILP uses the counter plus telemetry so a simultaneous burst does not all pick one worker"],d:"A burst of concurrent tasks spreads across all 3 workers."},
+ {id:"A3",t:"Mode lock and test reset hooks",f:"Scheduler + Redis helpers",c:["start_test(mode): set sched_mode, rr_counter = 0, in-flight = 0","Reject mode change while a test is running (HTTP 409)","Expose these as functions for the lifecycle endpoints (C2)"],d:"Starting a new test always begins at worker-1 with zeroed counters."},
+ {id:"A4",t:"Scheduler tests",f:"tests/",c:["3 clients send 30+ RR tasks concurrently; sort by dispatch_seq; assert strict w1,w2,w3 cycle","Assert solver calls == 0 in RR test and > 0 in MILP test"],d:"Both tests pass; keep output as review proof."}]},
+{n:"Member 2",r:"Worker and Infrastructure",t:[
+ {id:"B1",t:"Worker task functions",f:"worker/executor.py",c:["light: CGPA calculation","heavy: hash with configurable iterations (about 0.5-1s CPU)","Reject payload sizes above a safe limit"],d:"Both task types return correct results and expected timings."},
+ {id:"B2",t:"Worker queue and limits",f:"worker/executor.py, backend profiles file",c:["Concurrency limit of 2 plus a bounded queue","Return 503 when the queue is full","Keep reporting psutil CPU/RAM and queue length","Tune TASK_PROFILES for e2-micro (1 vCPU, 1 GB)"],d:"Flooding one worker produces visible queueing and 503s, not a crash."},
+ {id:"B3",t:"GCP provisioning",f:"infra/gcp/provision.sh",c:["1 controller (e2-medium, public IP) + 3 workers (e2-micro, internal only)","Custom VPC with fixed internal IPs"],d:"4 VMs up; controller reaches workers on port 8001."},
+ {id:"B4",t:"Firewall and Nginx",f:"infra/gcp, infra/nginx/nginx.conf",c:["Public 80/443 to controller only; 8001 and 6379 internal only","Serve built frontend at /, proxy /api/ and /ws to FastAPI","Auth on /ops and /api/v1/admin/"],d:"Site opens from a phone on mobile data; workers are unreachable from the internet."}]},
+{n:"Member 3",r:"Backend: task API, test lifecycle and CSV",t:[
+ {id:"C1",t:"Public task endpoint",f:"backend/app/api/tasks.py",c:["Accept client_id, task_type, size, sent_at","Call the scheduler, forward to the worker, return result + assigned_worker + timings","No scheduler-mode parameter on this endpoint"],d:"Browser request returns a result with 'served by worker-X'."},
+ {id:"C2",t:"Test lifecycle endpoints",f:"backend/app/api/admin.py",c:["POST /admin/test/start, POST /admin/test/stop, GET /test/status","States: idle, armed (start_at = now + 5s), running, draining (wait up to 15s), idle","One test at a time (409 otherwise); call A3 hooks; ADMIN_TOKEN Bearer auth","Tasks outside a test are served but logged with test_id = none"],d:"Status endpoint drives all laptops to start together."},
+ {id:"C3",t:"CSV logger",f:"backend/app/core/logger.py",c:["Buffered single-writer append to data/test_log.csv with the agreed columns","Log scheduler_used at the dispatch decision, not from a global flag"],d:"One correct row per request, no slowdown in dispatch."},
+ {id:"C4",t:"Summary and stats endpoints",f:"logger.py, admin.py",c:["At test end write one row to data/test_summary.csv","busy_time_stddev = std-dev of per-worker busy time (sum of exec_ms), not task counts","GET /admin/stats/summary, GET /admin/stats/download, POST /admin/stats/reset"],d:"After each test the summary row appears automatically."}]},
+{n:"Member 4",r:"Frontend and laptop load client",t:[
+ {id:"D1",t:"load_client.py",f:"tools/load_client.py",c:["Poll /test/status until armed; read test params and start_at","Build task list from seed + laptop_no: exponential gaps (mean 1/lambda), heavy with probability heavy_ratio","Sleep until start_at, send asynchronously without waiting for replies, stop at duration","Print sent / ok / failed"],d:"3 laptops start together and each produce the same workload in both tests."},
+ {id:"D2",t:"Public page",f:"frontend/src/pages (new page), App.tsx",c:["Simple responsive page with 1-2 tools (CGPA, hash)","Show 'Served by worker-X in N ms'","Works on phone browsers"],d:"A phone on mobile data can run a tool and see the badge."},
+ {id:"D3",t:"/ops controls",f:"frontend ops page",c:["Token login","Mode, duration, lambda inputs and Start/Stop; mode selector disabled while running","Live state, countdown, per-worker in-flight/CPU bars, red OVERLOADED badge"],d:"Admin runs a full test from the page."},
+ {id:"D4",t:"/ops results and routes",f:"frontend ops page, App.tsx",c:["Results table from test_summary.csv: MILP vs Round Robin with difference % (avg_ms, p95_ms, failed, busy_time_stddev)","Download CSV buttons","Routes: / public, /ops admin, /benchmark kept"],d:"Review screen shows the time difference between both methods."}]}
+];
+var KEY="cb_done",done={};
+try{done=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+var cur=0;
+function save(){try{localStorage.setItem(KEY,JSON.stringify(done))}catch(e){}}
+function render(){
+  var m=members[cur],tabs=document.getElementById("tabs"),p=document.getElementById("panel");
+  tabs.innerHTML=members.map(function(x,i){return'<button class="tab'+(i==cur?' on':'')+'" data-i="'+i+'">'+x.n+'</button>'}).join("");
+  var n=m.t.filter(function(t){return done[t.id]}).length,pc=Math.round(n/m.t.length*100);
+  p.innerHTML='<p class="role"><b>'+m.n+'</b> · '+m.r+'</p><div class="bar"><div style="width:'+pc+'%"></div></div>'+
+   m.t.map(function(t){return'<div class="task'+(done[t.id]?' done':'')+'"><h4><label><input type="checkbox" data-id="'+t.id+'"'+(done[t.id]?' checked':'')+'><span class="tid">'+t.id+'</span><span class="t">'+t.t+'</span></label></h4><div class="meta">Files: '+t.f+'</div><ul>'+t.c.map(function(c){return'<li>'+c+'</li>'}).join("")+'</ul><div class="dn">Done when: '+t.d+'</div></div>'}).join("");
+  tabs.querySelectorAll(".tab").forEach(function(b){b.onclick=function(){cur=+b.dataset.i;render()}});
+  p.querySelectorAll("input").forEach(function(i){i.onchange=function(){done[i.dataset.id]=i.checked;save();render()}});
+}
+render();
+try{var d=matchMedia('(prefers-color-scheme: dark)').matches;mermaid.initialize({startOnLoad:true,theme:d?'dark':'neutral'})}catch(e){}
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+[Unit]
+Description=CloudBalance FastAPI Load Balancer Controller
+# Controller runs independently of worker VMs and optional Redis/Mongo services.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<SERVICE_USER>
+Group=<SERVICE_GROUP>
+WorkingDirectory=<APP_DIR>/backend
+EnvironmentFile=/etc/cloudbalance/controller.env
+StateDirectory=cloudbalance/data
+ReadWritePaths=/var/lib/cloudbalance/data
+ExecStart=<VENV_DIR>/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+TimeoutStopSec=25
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

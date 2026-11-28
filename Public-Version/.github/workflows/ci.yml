@@ -1,0 +1,75 @@
+name: CloudBalance CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  backend-quality-and-tests:
+    name: Backend Lint, Typecheck, Tests & Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./backend[dev,bench]" -e "./traffic"
+
+      - name: Run Ruff Linter
+        run: |
+          cd backend
+          python -m ruff check . ../traffic ../worker ../benchmark ../scripts
+
+      - name: Run Mypy Typechecker
+        run: |
+          cd backend
+          python -m mypy app tests ../traffic ../worker ../benchmark
+
+      - name: Run Pytest with >=80% Coverage Gate
+        run: |
+          cd backend
+          python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+
+      - name: Run Seeded Multi-Scheduler Benchmark
+        run: |
+          python benchmark/run_benchmark.py
+
+  frontend-quality-and-build:
+    name: Frontend Typecheck, Vitest & Production Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript typecheck
+        run: npm run lint
+
+      - name: Run Vitest unit tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+

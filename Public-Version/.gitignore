@@ -1,0 +1,45 @@
+# Secrets & local runtime credentials (track templates like *.env.example)
+.env
+.env.*
+!.env.example
+deploy/*.env
+!deploy/*.env.example
+*.pem
+*.key
+*credentials*.json
+
+# Python caches, environments & test/coverage artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Node / frontend dependencies & build output
+node_modules/
+frontend/dist/
+frontend/coverage/
+Local-Version/frontend/dist/
+Local-Version/frontend/coverage/
+
+# Runtime CSV/DB data, archives & logs
+/data/
+/Local-Version/data/
+archive/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.zip
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

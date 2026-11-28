@@ -1,0 +1,134 @@
+services:
+  controller:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cb-controller
+    environment:
+      CB_ENV: "production"
+      # Tested single-process local store default; external Redis/Mongo (CB_LOCAL_MODE=false) is UNVERIFIED.
+      CB_LOCAL_MODE: "${CB_LOCAL_MODE:-true}"
+      CB_SEED_DEMO_WORKERS: "false"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}"
+      WORKER_SECRET: "${WORKER_SECRET:?Set WORKER_SECRET in .env}"
+      WORKER_URLS: "http://worker-1:8001,http://worker-2:8002,http://worker-3:8003"
+      CB_REQUIRE_API_KEY: "${CB_REQUIRE_API_KEY:-false}"
+      CB_API_KEY: "${CB_API_KEY:-}"
+      CB_ALLOWED_ORIGINS: "${CB_ALLOWED_ORIGINS:-http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1:5173}"
+      CB_DATA_DIR: "/app/data"
+      # Used only if opting into external-stores profile with CB_LOCAL_MODE=false (UNVERIFIED):
+      CB_REDIS_URL: "${CB_REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379/0}"
+      CB_MONGO_URL: "${CB_MONGO_URL:-mongodb://mongo:27017}"
+      CB_MONGO_DB_NAME: "${CB_MONGO_DB_NAME:-cloudbalance}"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-1
+    environment:
+      WORKER_ID: "worker-1"
+      WORKER_IP: "worker-1"
+      WORKER_PORT: "8001"
+      WORKER_TOTAL_MEM_MB: "4096"
+      WORKER_BASE_CPU_PCT: "12.0"
+      WORKER_BASE_MEM_MB: "580.0"
+      CONTROLLER_URL: "http://controller:8000"
+      WORKER_SECRET: "${WORKER_SECRET:?Set WORKER_SECRET in .env}"
+      WORKER_ENABLE_AGENT: "false"
+      WORKER_TELEMETRY_INTERVAL: "${WORKER_TELEMETRY_INTERVAL:-1.5}"
+      CB_API_KEY: "${CB_API_KEY:-}"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - controller
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-2
+    environment:
+      WORKER_ID: "worker-2"
+      WORKER_IP: "worker-2"
+      WORKER_PORT: "8002"
+      WORKER_TOTAL_MEM_MB: "4096"
+      WORKER_BASE_CPU_PCT: "18.5"
+      WORKER_BASE_MEM_MB: "760.0"
+      CONTROLLER_URL: "http://controller:8000"
+      WORKER_SECRET: "${WORKER_SECRET:?Set WORKER_SECRET in .env}"
+      WORKER_ENABLE_AGENT: "false"
+      WORKER_TELEMETRY_INTERVAL: "${WORKER_TELEMETRY_INTERVAL:-1.5}"
+      CB_API_KEY: "${CB_API_KEY:-}"
+    ports:
+      - "8002:8002"
+    depends_on:
+      - controller
+
+  worker-3:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: cb-worker-3
+    environment:
+      WORKER_ID: "worker-3"
+      WORKER_IP: "worker-3"
+      WORKER_PORT: "8003"
+      WORKER_TOTAL_MEM_MB: "8192"
+      WORKER_BASE_CPU_PCT: "9.5"
+      WORKER_BASE_MEM_MB: "960.0"
+      CONTROLLER_URL: "http://controller:8000"
+      WORKER_SECRET: "${WORKER_SECRET:?Set WORKER_SECRET in .env}"
+      WORKER_ENABLE_AGENT: "false"
+      WORKER_TELEMETRY_INTERVAL: "${WORKER_TELEMETRY_INTERVAL:-1.5}"
+      CB_API_KEY: "${CB_API_KEY:-}"
+    ports:
+      - "8003:8003"
+    depends_on:
+      - controller
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: cb-frontend
+    ports:
+      - "5173:80"
+      - "80:80"
+    depends_on:
+      - controller
+
+  # Optional external stores (UNVERIFIED; start via `docker compose --profile external-stores up` with CB_LOCAL_MODE=false)
+  redis:
+    profiles: ["external-stores"]
+    image: redis:7.2-alpine
+    container_name: cb-redis
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+    command:
+      - "sh"
+      - "-c"
+      - "test -n \"$$REDIS_PASSWORD\" || { echo 'REDIS_PASSWORD must be set for external-stores profile' >&2; exit 1; }; exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly no"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mongo:
+    profiles: ["external-stores"]
+    image: mongo:7.0
+    container_name: cb-mongo
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

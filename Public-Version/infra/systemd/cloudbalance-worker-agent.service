@@ -1,0 +1,20 @@
+[Unit]
+Description=CloudBalance Worker psutil Telemetry Agent (1.5s Heartbeat)
+After=network-online.target cloudbalance-worker-executor.service
+Wants=network-online.target
+Requires=cloudbalance-worker-executor.service
+
+[Service]
+Type=simple
+User=<SERVICE_USER>
+Group=<SERVICE_GROUP>
+WorkingDirectory=<APP_DIR>
+EnvironmentFile=/etc/cloudbalance/worker.env
+ExecStart=<VENV_DIR>/bin/python -m worker.agent --interval 1.5
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

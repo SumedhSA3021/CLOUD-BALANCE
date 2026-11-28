@@ -27,8 +27,15 @@ CLOUD-BALANCE/
 │   ├── .pre-commit-config.yaml     # Ruff, mypy, and secret-detection pre-commit hooks
 │   └── README.md                   # Complete project documentation & setup guide
 │
-├── Public-Version/                 # Reserved for the future standalone public deployment version
-│   └── .gitkeep
+├── Public-Version/                 # Standalone GCP & public multi-client CloudBalance release
+│   ├── backend/                    # FastAPI Controller (:8000), OR-Tools MILP/RR schedulers, 86 tests
+│   ├── frontend/                   # React 18 SPA: / (Tasks), /client (Poisson Load), /ops (Admin), /benchmark
+│   ├── worker/                     # Worker Executor (:8001) + psutil Telemetry Agent
+│   ├── deploy/                     # Production controller/worker env templates, Nginx, systemd, GCP runbook
+│   ├── infra/gcp/                  # GCP VPC/NAT/firewall/4-VM provisioning, startup & teardown scripts
+│   ├── scripts/                    # run_local.{ps1,sh}, preflight.py, smoke_test.py, final_acceptance.py
+│   ├── docs/                       # Audit, proof, architecture & project reports
+│   └── README.md                   # Complete Public-Version setup, test counts & GCP deployment guide
 │
 ├── .gitignore
 └── README.md

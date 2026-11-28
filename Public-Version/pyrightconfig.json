@@ -1,0 +1,21 @@
+{
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    "**/.mypy_cache",
+    "archive",
+    "docs"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "backend",
+        "."
+      ]
+    }
+  ]
+}

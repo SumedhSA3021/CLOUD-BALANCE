@@ -41,19 +41,41 @@ Thumbs.db
 CloudBalance.zip
 *.zip
 
-# Root-level local working copy preservation (tracked inside Local-Version/ instead)
+# Root-level local working copy preservation (tracked inside Local-Version/ & Public-Version/ instead)
 /.github/
 /01_Documentation_And_Reports/
+/archive/
 /backend/
 /benchmark/
+/conftest.py
+/deploy/
+/docs/
 /frontend/
 /infra/
 /local draft one/
+/pyrightconfig.json
 /traffic/
 /worker/
 /.env.example
 /.pre-commit-config.yaml
 /docker-compose.yml
 /Makefile
+/scripts/final_acceptance.py
+/scripts/load_client.py
+/scripts/preflight.py
+/scripts/run_local.ps1
+/scripts/run_local.sh
+/scripts/smoke_test.py
+
+# Public-Version runtime secrets, build outputs & local caches
+Public-Version/.env
+Public-Version/.env.*
+!Public-Version/.env.example
+Public-Version/deploy/*.env
+!Public-Version/deploy/*.env.example
+/Public-Version/data/
+/Public-Version/archive/
+/Public-Version/frontend/dist/
+/Public-Version/frontend/coverage/
 
 

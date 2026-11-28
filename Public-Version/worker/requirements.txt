@@ -1,0 +1,10 @@
+# CloudBalance Worker node runtime dependencies (excludes ortools, redis, motor, pydantic-settings)
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+numpy==2.2.6; python_version < "3.12"
+numpy==2.5.3; python_version >= "3.12"
+psutil==7.2.2
+httpx==0.28.1
+structlog==26.1.0
+

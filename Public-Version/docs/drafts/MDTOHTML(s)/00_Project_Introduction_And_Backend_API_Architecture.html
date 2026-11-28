@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudBalance — Project Introduction, Member-Wise Workload Distribution & Backend API Architecture</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        h1, h2, h3 { color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        h1 { border-bottom: 2px solid #3498db; }
+        img { max-width: 100%; height: auto; display: block; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; padding: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; box-shadow: 0 0 20px rgba(0, 0, 0, 0.05); }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dddddd; }
+        th { background-color: #f4f7f6; color: #333; font-weight: bold; }
+        tr:hover { background-color: #f5f5f5; }
+        code { background-color: #f4f4f4; border-radius: 4px; padding: 2px 4px; font-family: Consolas, monospace; font-size: 0.9em; color: #d63384; }
+        pre { background-color: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: Consolas, monospace; }
+        pre code { background-color: transparent; color: #333; padding: 0; }
+        ul, ol { margin-bottom: 15px; }
+        li { margin-bottom: 8px; }
+        .math { font-style: italic; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>CloudBalance — Project Introduction, Member-Wise Workload Distribution & Backend API Architecture</h1>
+    
+    <img src="./09_Backend_And_API_Call_Architecture.png" alt="CloudBalance Backend & API Call Architecture">
+
+    <h2>1. Project Introduction</h2>
+    <p><strong>CloudBalance</strong> is an adaptive, multi-resource cloud load balancer designed to overcome the core limitation of traditional cloud load-balancing heuristics (such as Round Robin and Least Connections)[cite: 1]. Traditional load balancers route incoming requests blindly without considering[cite: 1]:</p>
+    <ol>
+        <li><strong>Multi-dimensional task resource costs</strong> (a CPU-heavy AI inference job vs. a RAM-heavy in-memory graph query vs. a lightweight database lookup)[cite: 1].</li>
+        <li><strong>Live heterogeneous server utilization</strong> (real-time CPU percentage, physical RAM usage, and in-flight queued load across worker VMs of different capacities)[cite: 1].</li>
+    </ol>
+    <p>CloudBalance solves this through a <strong>four-stage closed-loop feedback architecture (<code>Monitor -&gt; Optimize -&gt; Dispatch -&gt; Visualize</code>)</strong> exposed behind a <strong>Single Public Entry Point (<code>:8000</code>)</strong>[cite: 1]:</p>
+    <ul>
+        <li><strong>Clients (3+ Laptops & Mobile Devices)</strong> only know the Controller's single URL (<code>http://&lt;Controller-IP&gt;:8000</code>)[cite: 1]. Clients never declare raw CPU or RAM numbers; they interact with the Client Portal (<code>/client</code>) or run the <code>cb-traffic</code> CLI and send only <code>{ "client_id": "...", "task_type": "..." }</code>[cite: 1].</li>
+        <li><strong>The FastAPI Controller (<code>:8000</code>)</strong> validates requests, applies rate-limiting and queue backpressure (<code>HTTP 429</code>), and maps each <code>task_type</code> to its authoritative server-side resource profile (<code>cpu_demand_pct</code>, <code>mem_demand_mb</code>, <code>duration_sec</code>, <code>matrix_dim</code>)[cite: 1]. It collects tasks into <strong>200ms micro-batches</strong>, reads live worker telemetry from <strong>Redis (<code>cluster:worker:*</code>)</strong>, and asks the <strong>Google OR-Tools Mixed-Integer Linear Programming (MILP) Scheduler</strong> for the globally optimal task-to-worker assignment matrix <span class="math">X<sub>ij</sub></span>[cite: 1].</li>
+        <li><strong>Private Internal Worker VMs (<code>:8001</code>, <code>:8002</code>, <code>:8003</code>)</strong> have no public IP exposure[cite: 1]. They receive dispatched tasks over the internal network (<code>POST /execute</code>), execute genuine <strong>NumPy (<code>np.dot</code>)</strong> matrix multiplications, and run a <strong><code>psutil</code> Telemetry Agent</strong> that reports real-time CPU, RAM, load average, and active task counts back to the Controller every 1.5–2.0 seconds (<code>SETEX cluster:worker:{id} 10</code>)[cite: 1].</li>
+        <li><strong>Dual-Database Persistence & Live WebSocket Streaming</strong>: Ephemeral live state is stored in <strong>Redis</strong> (with 10s worker TTL for automatic dead-node eviction)[cite: 1]. Historical assignments and benchmark runs are stored in <strong>MongoDB / SQLite</strong>[cite: 1]. A <strong>1.5s WebSocket Broadcaster (<code>/ws</code>)</strong> pushes live <code>CLUSTER_SNAPSHOT</code> frames to the React 18 Ops Dashboard (<code>/</code>) and Client Portal (<code>/client</code>)[cite: 1].</li>
+    </ul>
+
+    <h2>2. Master 4-Member Workload Distribution Matrix (Current Production Build)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Member</th>
+                <th>Name & Role</th>
+                <th>Core Technologies</th>
+                <th>Exact Files Owned in Current Project Build</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Member 1</strong></td>
+                <td><strong>Ananya</strong><br><em>Monitoring, Telemetry Agent & Redis State</em></td>
+                <td>Python, <code>psutil</code>, Redis (<code>SETEX</code> 10s TTL), GCP Ubuntu Worker VMs</td>
+                <td>
+                    <ul>
+                        <li><code>worker/agent.py</code> (<code>WorkerTelemetryAgent</code>, <code>sample_worker_telemetry</code>)</li>
+                        <li><code>backend/app/core/redis_client.py</code> (<code>DualRedisClient</code>, <code>InMemoryTTLStore</code>)</li>
+                        <li><code>backend/app/services/cluster_state.py</code> (<code>ClusterStateService</code>)</li>
+                        <li><code>backend/app/api/telemetry.py</code> (<code>POST /api/v1/telemetry</code>, <code>GET /workers</code>, <code>GET /redis</code>)</li>
+                        <li><code>infra/gcp/provision.sh</code>, <code>startup-worker.sh</code>, <code>infra/systemd/*</code></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Member 2</strong></td>
+                <td><strong>Sumedh</strong><br><em>Workload Modeling, Poisson Traffic & OR-Tools MILP Optimizer</em></td>
+                <td>Python, NumPy (<code>np.dot</code>), Poisson Process, Google OR-Tools (<code>pywraplp</code> CBC/SCIP)</td>
+                <td>
+                    <ul>
+                        <li><code>backend/app/core/profiles.py</code> (<code>TASK_PROFILES</code>, <code>resolve_task_profile</code>)</li>
+                        <li><code>worker/executor.py</code> (<code>_run_numpy_dot_kernel</code>, <code>POST /execute</code>)</li>
+                        <li><code>traffic/poisson_generator.py</code>, <code>traffic/workloads.py</code>, <code>traffic/cli.py</code></li>
+                        <li><code>backend/app/schedulers/base.py</code> (<code>BaseScheduler</code>, <code>InFlightTracker</code>)</li>
+                        <li><code>backend/app/schedulers/ortools_milp.py</code> (<code>ORToolsMILPScheduler</code>)</li>
+                        <li><code>backend/app/schedulers/round_robin.py</code>, <code>least_connections.py</code></li>
+                        <li><code>benchmark/run_benchmark.py</code></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Member 3</strong></td>
+                <td><strong>Nafisa</strong><br><em>FastAPI Backend, Micro-Batcher, Dispatcher, WebSockets & MongoDB</em></td>
+                <td>FastAPI, Pydantic v2, <code>httpx</code>, <code>tenacity</code>, WebSockets, MongoDB (<code>motor</code> + SQLite)</td>
+                <td>
+                    <ul>
+                        <li><code>backend/app/main.py</code> (App factory, lifespan, CORS, SPA static mount)</li>
+                        <li><code>backend/app/models/schemas.py</code> (All Pydantic v2 contracts)</li>
+                        <li><code>backend/app/api/tasks.py</code>, <code>control.py</code>, <code>websocket.py</code>, <code>health.py</code>, <code>benchmark.py</code></li>
+                        <li><code>backend/app/services/batcher.py</code> (<code>MicroBatcherService</code>)</li>
+                        <li><code>backend/app/services/dispatcher.py</code> (<code>DispatcherService</code> + failover)</li>
+                        <li><code>backend/app/services/broadcaster.py</code> (<code>WebSocketBroadcaster</code>)</li>
+                        <li><code>backend/app/services/history.py</code>, <code>client_stats.py</code></li>
+                        <li><code>backend/app/core/mongo_client.py</code>, <code>config.py</code>, <code>security.py</code>, <code>logging.py</code></li>
+                        <li><code>backend/run_cluster.py</code></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Member 4</strong></td>
+                <td><strong>Shubham</strong><br><em>React Ops Dashboard, Interactive Client Portal & Chart.js Visualization</em></td>
+                <td>React 18, TypeScript, Vite, Tailwind CSS, Chart.js, WebSockets</td>
+                <td>
+                    <ul>
+                        <li><code>frontend/src/pages/DashboardPage.tsx</code> (Main Ops Dashboard <code>/</code>)</li>
+                        <li><code>frontend/src/pages/ClientPage.tsx</code> (Interactive Client Portal <code>/client</code>)</li>
+                        <li><code>frontend/src/pages/BenchmarkPage.tsx</code> (3-Scheduler Comparison UI)</li>
+                        <li><code>frontend/src/components/Header.tsx</code>, <code>WorkerCard.tsx</code>, <code>MetricsChart.tsx</code>, <code>AssignmentFeed.tsx</code>, <code>ClientPanel.tsx</code>, <code>ControlPanel.tsx</code></li>
+                        <li><code>frontend/src/hooks/useWebSocket.ts</code></li>
+                        <li><code>frontend/src/lib/api.ts</code>, <code>frontend/src/lib/types.ts</code></li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <p><em>* Entire table[cite: 1]</em></p>
+
+    <h2>3. How the API Calls Work Across the Whole System (Step-by-Step Lifecycle)</h2>
+    <p>Every numbered step below corresponds directly to <code>[1]</code>–<code>[12]</code> in the architecture diagram above[cite: 1]:</p>
+
+    <h3>Step <code>[1]</code> — Client Sends Task Request to Single Public Entry Point (<code>:8000</code>)</h3>
+    <ul>
+        <li><strong>Caller</strong>: Laptop/Mobile Browser on <code>/client</code> (<code>frontend/src/lib/api.ts</code>) or <code>cb-traffic</code> CLI (<code>traffic/cli.py</code>)[cite: 1].</li>
+        <li><strong>Endpoint</strong>: <code>POST /api/v1/tasks</code> (with automatic idempotent fallback <code>GET /api/v1/tasks/submit?client_id=...&task_type=...</code> for mobile hotspots)[cite: 1].</li>
+        <li><strong>Request Payload</strong>[cite: 1]:
+<pre><code>{
+  "client_id": "laptop-alpha",
+  "task_type": "CPU_INTENSIVE"
+}</code></pre>
+        </li>
+        <li><strong>Guardrails Checked (<code>backend/app/api/tasks.py</code>)</strong>[cite: 1]:
+            <ol>
+                <li><code>verify_api_key</code> checks <code>X-API-Key</code> when <code>CB_REQUIRE_API_KEY=true</code>[cite: 1].</li>
+                <li><code>TokenBucketRateLimiter</code> checks per-second burst limits (<code>HTTP 429</code> if exceeded)[cite: 1].</li>
+                <li>Queue depth check: if <code>batcher.queue_depth &gt;= max_queue_depth</code>, immediately returns <code>HTTP 429 Too Many Requests</code> (backpressure)[cite: 1].</li>
+            </ol>
+        </li>
+    </ul>
+
+    <h3>Step <code>[2]</code> — Server-Side Resource Profile Resolution</h3>
+    <ul>
+        <li><strong>Module</strong>: <code>backend/app/core/profiles.py</code> (<code>resolve_task_profile</code>) & <code>Task.from_request()</code> (<code>backend/app/models/schemas.py</code>)[cite: 1].</li>
+        <li><strong>What Happens</strong>: Clients never specify CPU% or RAM MB[cite: 1]. The Controller looks up <code>task_type</code> in its authoritative table[cite: 1]:
+            <ul>
+                <li><code>CPU_INTENSIVE</code> &rarr; <code>35.0% CPU</code>, <code>256.0 MB RAM</code>, <code>2400×2400 matrix</code>, <code>4.0s duration</code>[cite: 1]</li>
+                <li><code>MEMORY_INTENSIVE</code> &rarr; <code>15.0% CPU</code>, <code>1024.0 MB RAM</code>, <code>4500×4500 matrix</code>, <code>5.0s duration</code>[cite: 1]</li>
+                <li><code>BALANCED_COMPUTE</code> &rarr; <code>25.0% CPU</code>, <code>512.0 MB RAM</code>, <code>2000×2000 matrix</code>, <code>3.0s duration</code>[cite: 1]</li>
+                <li><code>LIGHTWEIGHT_QUERY</code> &rarr; <code>10.0% CPU</code>, <code>128.0 MB RAM</code>, <code>1000×1000 matrix</code>, <code>1.5s duration</code>[cite: 1]</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[3]</code> — Enqueue into Micro-Batcher (<code>200ms</code> Window or <code>20</code> Tasks)</h3>
+    <ul>
+        <li><strong>Module</strong>: <code>backend/app/services/batcher.py</code> (<code>MicroBatcherService.enqueue</code>)[cite: 1].</li>
+        <li><strong>What Happens</strong>:
+            <ul>
+                <li>The enriched <code>Task</code> is appended to an async queue (<code>collections.deque</code>), and <code>client_stats.record_enqueue()</code> updates per-client arrival rates (<code>req/s</code>)[cite: 1].</li>
+                <li>The task is also cached in Redis (<code>SETEX cluster:task:{task_id} 60 &lt;json&gt;</code>)[cite: 1].</li>
+                <li>The Controller immediately returns <code>HTTP 202 Accepted</code> to the client with the generated <code>task_id</code> and <code>queue_depth</code>[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[4]</code> & <code>[9]</code> — Micro-Batcher Reads Live Workers from Redis & Calls Scheduler</h3>
+    <ul>
+        <li><strong>Modules</strong>: <code>ClusterStateService.get_active_workers()</code> (<code>backend/app/services/cluster_state.py</code>) &rarr; <code>ORToolsMILPScheduler.assign()</code> (<code>backend/app/schedulers/ortools_milp.py</code>)[cite: 1].</li>
+        <li><strong>What Happens</strong>:
+            <ul>
+                <li>Every <code>200ms</code> (or immediately when 20 tasks accumulate), <code>flush_one_batch()</code> reads all non-expired <code>cluster:worker:*</code> keys from Redis (<code>[9]</code>)[cite: 1].</li>
+                <li>It passes <code>(batch_tasks, active_workers)</code> to the active scheduler (<code>ortools_milp</code>, <code>round_robin</code>, or <code>least_connections</code>)[cite: 1].</li>
+                <li><strong>OR-Tools MILP</strong> combines each worker's Redis telemetry with <code>InFlightTracker</code> reservations, solves the binary assignment problem (<span class="math">min Z + 0.001 M</span> subject to <span class="math">&sum;<sub>j</sub> X<sub>ij</sub>=1</span>, <span class="math">CPU<sub>j</sub> &le; 85%</span>, <span class="math">RAM<sub>j</sub> &le; 90%</span>), registers new in-flight reservations, and returns <code>BatchAssignmentResult(assignments, meta)</code>[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[5]</code> & <code>[6]</code> — Internal HTTP Dispatch to Worker Executor (<code>:8001–8003</code>) & Automatic Failover</h3>
+    <ul>
+        <li><strong>Module</strong>: <code>backend/app/services/dispatcher.py</code> (<code>DispatcherService.dispatch_task</code>)[cite: 1].</li>
+        <li><strong>Endpoint Called (Internal RPC)</strong>: <code>POST http://&lt;worker_internal_ip&gt;:&lt;port&gt;/execute</code> (e.g., <code>http://127.0.0.1:8001/execute</code> locally or <code>http://10.128.0.11:8001/execute</code> on GCP VPC)[cite: 1].</li>
+        <li><strong>Request Payload</strong>[cite: 1]:
+<pre><code>{
+  "task_id": "tsk-a53ed9071d",
+  "duration_sec": 4.0,
+  "matrix_dim": 2400,
+  "cpu_demand_pct": 35.0,
+  "mem_demand_mb": 256.0
+}</code></pre>
+        </li>
+        <li><strong>Retries & Automatic Re-Solve Failover</strong>:
+            <ul>
+                <li>Uses <code>tenacity.AsyncRetrying</code> (<code>stop_after_attempt</code>, timeout)[cite: 1].</li>
+                <li>If a worker VM crashes or times out, <code>DispatcherService</code> immediately releases its in-flight reservation, evicts <code>cluster:worker:{failed_id}</code> from Redis, <strong>re-runs the scheduler excluding the failed worker</strong>, and dispatches the task to the newly chosen healthy worker VM[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[7]</code> & <code>[8]</code> — Worker Executes Real <code>np.dot</code> & Reports <code>psutil</code> Telemetry to Redis</h3>
+    <ul>
+        <li><strong>Modules</strong>: <code>worker/executor.py</code> (<code>execute_workload</code>) & <code>worker/agent.py</code> (<code>WorkerTelemetryAgent</code>) &rarr; <code>POST /api/v1/telemetry</code> (<code>backend/app/api/telemetry.py</code>)[cite: 1].</li>
+        <li><strong>What Happens</strong>:
+            <ul>
+                <li>The Worker increments its active task counters, immediately pushes a live telemetry update to <code>POST /api/v1/telemetry</code>, and runs real NumPy matrix multiplications (<code>np.dot(a, b)</code>) in a worker thread[cite: 1].</li>
+                <li>Every <code>1.5s–2.0s</code> (and upon task start/completion), the worker agent samples <code>psutil.cpu_percent()</code>, <code>psutil.virtual_memory()</code>, <code>os.getloadavg()</code>, and <code>active_task_count</code> and sends <code>POST /api/v1/telemetry</code>[cite: 1].</li>
+                <li>The Controller executes <code>SETEX cluster:worker:{worker_id} 10 &lt;json&gt;</code> in Redis (<code>[8]</code>)[cite: 1]. If a worker dies and stops sending heartbeats, its Redis key automatically expires after 10 seconds[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[10]</code> — Persist Assignment & Completion Status to MongoDB / SQLite</h3>
+    <ul>
+        <li><strong>Modules</strong>: <code>backend/app/services/history.py</code> (<code>HistoryService</code>) & <code>backend/app/core/mongo_client.py</code> (<code>DualMongoClient</code>)[cite: 1].</li>
+        <li><strong>What Happens</strong>:
+            <ul>
+                <li>When a task is scheduled, an <code>Assignment</code> record (<code>status="ASSIGNED"</code>) is saved[cite: 1].</li>
+                <li>When <code>POST /execute</code> returns <code>200 OK</code> with <code>execution_ms</code>, <code>HistoryService</code> updates the record to <code>status="COMPLETED"</code> with the real execution time in both MongoDB/SQLite (<code>assignments</code> collection/table) and Redis (<code>cluster:assignment:{task_id}</code>)[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Step <code>[11]</code> & <code>[12]</code> — Real-Time WebSocket Broadcast (<code>/ws</code>) & Runtime Control APIs</h3>
+    <ul>
+        <li><strong>Modules</strong>: <code>backend/app/services/broadcaster.py</code> (<code>WebSocketBroadcaster</code>), <code>backend/app/api/websocket.py</code>, <code>backend/app/api/control.py</code>[cite: 1].</li>
+        <li><strong>What Happens</strong>:
+            <ul>
+                <li>Every <code>1.5s</code> (and immediately on any control action), <code>WebSocketBroadcaster</code> builds a <code>ClusterSnapshot</code> combining live worker snapshots (<code>workers</code>), the last 20 assignments (<code>recent_assignments</code>), per-laptop metrics (<code>clients</code>), <code>queue_depth</code>, <code>active_scheduler</code>, and <code>avg_solver_latency_ms</code>, and broadcasts it over <code>WS /ws</code> (<code>[11]</code>)[cite: 1].</li>
+                <li>Operators on the Dashboard can hot-swap schedulers (<code>POST /api/v1/control/scheduler</code>), inject burst spikes (<code>POST /api/v1/control/traffic</code>), or simulate worker crashes/revivals (<code>POST /api/v1/control/workers/{id}/kill</code> and <code>/revive</code>) (<code>[12]</code>)[cite: 1].</li>
+            </ul>
+        </li>
+    </ul>
+
+</body>
+</html>

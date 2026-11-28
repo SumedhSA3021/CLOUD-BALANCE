@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudBalance — Member-Wise Project Guides</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 1100px; margin: 0 auto; padding: 20px; background-color: #fafafa; }
+        .member-section { background-color: #fff; padding: 30px; margin-bottom: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h1, h2, h3 { color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top: 30px; }
+        h1 { border-bottom: 3px solid #3498db; font-size: 2.2em; margin-top: 0; }
+        h2 { border-bottom: 2px solid #2ecc71; }
+        h3 { border-bottom: none; color: #34495e; }
+        img { max-width: 100%; height: auto; display: block; margin: 20px 0; border: 1px solid #ddd; border-radius: 4px; padding: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dddddd; vertical-align: top; }
+        th { background-color: #f4f7f6; color: #333; font-weight: bold; border-bottom: 2px solid #ddd; }
+        tr:hover { background-color: #f9f9f9; }
+        code { background-color: #f1f3f5; border-radius: 4px; padding: 2px 5px; font-family: Consolas, monospace; font-size: 0.9em; color: #d63384; }
+        pre { background-color: #2b2b2b; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: Consolas, monospace; color: #f8f8f2; }
+        pre code { background-color: transparent; color: inherit; padding: 0; }
+        ul, ol { margin-bottom: 15px; padding-left: 20px; }
+        li { margin-bottom: 8px; }
+        .math { font-style: italic; font-weight: bold; font-family: 'Times New Roman', Times, serif; }
+        .role-header { background-color: #e8f4f8; padding: 15px; border-left: 5px solid #3498db; margin-bottom: 25px; border-radius: 0 4px 4px 0; }
+        .role-header p { margin: 5px 0; }
+        .note { font-size: 0.9em; color: #7f8c8d; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <!-- ==========================================
+         MEMBER 1 SECTION
+         ========================================== -->
+    <div class="member-section">
+        <h1>Member 1 (Ananya) — Monitoring, Telemetry Agent & Redis Live State Guide</h1>
+        
+        <div class="role-header">
+            <p><strong>Role:</strong> Module 1 — Server Monitoring, <code>psutil</code> Telemetry Collection & Redis TTL State Store[cite: 2]</p>
+            <p><strong>Technologies:</strong> Python 3.11, <code>psutil</code>, <code>httpx</code>, Redis (<code>redis.asyncio</code> + <code>InMemoryTTLStore</code>), GCP Compute Engine (Ubuntu 22.04), <code>systemd</code>[cite: 2]</p>
+        </div>
+
+        <h2>1. Scope & Responsibilities in the Current Build</h2>
+        <p>Member 1 owns the <strong>Sensing & Live State Layer</strong> of CloudBalance[cite: 2]. Without accurate, low-latency telemetry from every Worker VM, the OR-Tools MILP scheduler cannot know which server is idle and which server is about to overload[cite: 2].</p>
+        <p>Your exact responsibilities in the codebase are[cite: 2]:</p>
+        <ol>
+            <li><strong>Worker Telemetry Agent (<code>worker/agent.py</code>)</strong>: Sampling real OS metrics (<code>CPU%</code>, <code>RAM used/total MB</code>, <code>RAM%</code>, <code>1-minute load average</code>, and <code>active_task_count</code>) on every worker node every <code>1.5s–2.0s</code> and transmitting them to the Controller via <code>POST /api/v1/telemetry</code>[cite: 2].</li>
+            <li><strong>Dual-Mode Redis Client (<code>backend/app/core/redis_client.py</code>)</strong>: Storing live worker snapshots in memory using <code>SETEX cluster:worker:{worker_id} 10 &lt;json&gt;</code> with a strict <strong>10-second Time-To-Live (TTL)</strong>, with automatic fallback to <code>InMemoryTTLStore</code> when running locally without an external Redis server[cite: 2].</li>
+            <li><strong>Cluster State Service (<code>backend/app/services/cluster_state.py</code>)</strong>: Reading active workers (<code>cluster:worker:*</code>), combining raw worker telemetry with in-flight reservations, and handling instant worker eviction (<code>evict_worker</code>, <code>kill_worker</code>, <code>revive_worker</code>)[cite: 2].</li>
+            <li><strong>Telemetry Ingestion & Inspection APIs (<code>backend/app/api/telemetry.py</code>)</strong>: Exposing <code>POST /api/v1/telemetry</code>, <code>GET /api/v1/telemetry/workers</code>, and <code>GET /api/v1/telemetry/redis</code>[cite: 2].</li>
+            <li><strong>Cloud Worker VM Provisioning (<code>infra/gcp/provision.sh</code>, <code>infra/gcp/startup-worker.sh</code>, <code>infra/systemd/</code>)</strong>: Provisioning private Ubuntu 22.04 worker VMs on Google Cloud and running the telemetry agent as an auto-restarting <code>systemd</code> daemon[cite: 2].</li>
+        </ol>
+
+        <h2>2. Exact Files Owned by Member 1</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>File Path</th>
+                    <th>Key Classes / Functions</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>worker/agent.py</code></td>
+                    <td><code>sample_worker_telemetry()</code>, <code>WorkerTelemetryAgent</code></td>
+                    <td>Samples <code>psutil</code> CPU/RAM/load + active tasks and POSTs JSON to <code>/api/v1/telemetry</code> every 1.5–2s.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/core/redis_client.py</code></td>
+                    <td><code>DualRedisClient</code>, <code>InMemoryTTLStore</code></td>
+                    <td>Unified async Redis client supporting <code>setex</code>, <code>get</code>, <code>keys</code>, <code>ttl</code>, <code>delete</code> across real Redis and local in-memory TTL store.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/services/cluster_state.py</code></td>
+                    <td><code>ClusterStateService</code></td>
+                    <td>Manages <code>cluster:worker:{id}</code> keys with 10s TTL, builds <code>WorkerSnapshotItem</code>s, and handles worker kill/revive/failover eviction.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/api/telemetry.py</code></td>
+                    <td><code>ingest_telemetry()</code>, <code>list_workers()</code>, <code>inspect_redis_state()</code></td>
+                    <td>FastAPI router for <code>/api/v1/telemetry</code>, <code>/api/v1/telemetry/workers</code>, and <code>/api/v1/telemetry/redis</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>infra/gcp/provision.sh</code> & <code>startup-worker.sh</code></td>
+                    <td>GCP VPC & Worker VM scripts</td>
+                    <td>Creates <code>cloudbalance-net</code> VPC, firewall rules, and private <code>e2-medium</code> Ubuntu worker VMs.</td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="note">* Entire table[cite: 2]</p>
+
+        <h2>3. Code & Pipeline Walkthrough</h2>
+        <h3>A. Sampling OS Metrics with <code>psutil</code> (<code>worker/agent.py</code>)</h3>
+        <p>In <code>sample_worker_telemetry()</code>[cite: 2]:</p>
+        <ul>
+            <li><code>psutil.cpu_percent(interval=None)</code> reads non-blocking kernel CPU utilization[cite: 2].</li>
+            <li><code>psutil.virtual_memory()</code> reads total physical RAM (<code>vm.total</code>) and used RAM (<code>vm.used</code>), converted to megabytes[cite: 2].</li>
+            <li><code>_get_os_load_avg()</code> reads 1-minute OS run-queue load via <code>os.getloadavg()</code> on Linux (with a safe fallback on Windows)[cite: 2].</li>
+            <li>When running multiple worker processes on a single local machine (<code>virtual_profile=True</code>), it blends real <code>psutil</code> host CPU readings with each worker's distinct hardware profile (<code>worker-1</code>: 4 GB RAM, <code>worker-2</code>: 4 GB RAM, <code>worker-3</code>: 8 GB RAM) and active executing task load (<code>runtime_state.active_cpu_demand_pct</code> and <code>active_mem_demand_mb</code>)[cite: 2].</li>
+        </ul>
+
+        <h3>B. Telemetry Payload Contract (<code>Telemetry</code> Schema)</h3>
+        <p>Every heartbeat sent to <code>POST /api/v1/telemetry</code> follows this strict Pydantic v2 contract[cite: 2]:</p>
+<pre><code>{
+  "worker_id": "worker-1",
+  "ip_address": "127.0.0.1",
+  "port": 8001,
+  "timestamp": "2026-11-11T18:05:35.120000Z",
+  "cpu_percent": 38.25,
+  "memory_total_mb": 4096.0,
+  "memory_used_mb": 1664.0,
+  "memory_percent": 40.63,
+  "load_avg_1m": 1.53,
+  "active_task_count": 1
+}</code></pre>
+
+        <h3>C. Why Redis with a 10-Second TTL (<code>SETEX cluster:worker:{id} 10</code>)?</h3>
+        <p>In <code>ClusterStateService.update_telemetry()</code>[cite: 2]:</p>
+<pre><code>key = self.worker_key(telemetry.worker_id)  # "cluster:worker:worker-1"
+payload = telemetry.model_dump_json()
+await self._redis.setex(key, self._ttl_seconds, payload)  # TTL = 10 seconds</code></pre>
+        <ul>
+            <li><strong>O(1) In-Memory Speed</strong>: The micro-batcher runs every 200ms[cite: 2]. Reading 3 worker keys from Redis takes <code>&lt; 1 ms</code>, whereas querying disk-based databases on every batch would bottleneck the scheduler[cite: 2].</li>
+            <li><strong>Self-Healing Passive Health Check</strong>: Each worker refreshes its key every 1.5–2.0 seconds, resetting its TTL back to <code>10</code> seconds[cite: 2]. If a worker VM crashes or loses network connectivity, its key automatically vanishes from Redis after 10 seconds—achieving automatic failover with zero manual intervention[cite: 2].</li>
+        </ul>
+
+        <h3>D. Worker Health Status Thresholds (<code>compute_worker_status</code>)</h3>
+        <p>In <code>backend/app/models/schemas.py</code>[cite: 2]:</p>
+        <ul>
+            <li><strong><code>HEALTHY</code> (Green)</strong>: <code>cpu_percent &lt; 60%</code> AND <code>memory_percent &lt; 70%</code>[cite: 2]</li>
+            <li><strong><code>MODERATE</code> (Amber)</strong>: <code>cpu_percent</code> in <code>60–84%</code> OR <code>memory_percent</code> in <code>70–89%</code>[cite: 2]</li>
+            <li><strong><code>CRITICAL</code> (Red)</strong>: <code>cpu_percent &gt;= 85%</code> OR <code>memory_percent &gt;= 90%</code>[cite: 2]</li>
+        </ul>
+
+        <h2>4. API Endpoints Owned by Member 1</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Method & Path</th>
+                    <th>Description</th>
+                    <th>Sample Response</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>POST /api/v1/telemetry</code></td>
+                    <td>Receives worker <code>psutil</code> heartbeat and executes <code>SETEX cluster:worker:{id} 10 &lt;json&gt;</code>.</td>
+                    <td><code>{"accepted": true, "worker_id": "worker-1", "ttl_seconds": 10}</code></td>
+                </tr>
+                <tr>
+                    <td><code>GET /api/v1/telemetry/workers</code></td>
+                    <td>Returns active <code>WorkerSnapshotItem</code> list combining Redis state + in-flight load.</td>
+                    <td><code>[{"worker_id": "worker-1", "cpu_percent": 13.8, "status": "HEALTHY", ...}]</code></td>
+                </tr>
+                <tr>
+                    <td><code>GET /api/v1/telemetry/redis</code></td>
+                    <td>Live inspector showing all <code>cluster:*</code> keys and their remaining <code>ttl_seconds</code> in Redis.</td>
+                    <td><code>{"redis_backend_mode": "in_memory_ttl", "total_keys": 9, "keys": {...}}</code></td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="note">* Entire table[cite: 2]</p>
+
+        <h2>5. Top Viva Questions & Answers for Member 1</h2>
+        <ol>
+            <li><strong>Q: Why use Redis for worker telemetry instead of storing it in MongoDB?</strong><br>
+            <strong>A:</strong> Telemetry is high-frequency, ephemeral state updated every 1.5–2 seconds per worker and read every 200ms by the scheduler[cite: 2]. Redis stores keys in RAM with sub-millisecond latency and supports native key expiration (<code>SETEX</code> with 10s TTL), so stale/dead workers automatically disappear without background cleanup jobs[cite: 2].</li>
+            <li><strong>Q: What happens if a Worker VM crashes mid-execution?</strong><br>
+            <strong>A:</strong> Two mechanisms protect the cluster: (a) if an HTTP dispatch to <code>:8001/execute</code> fails, <code>DispatcherService</code> immediately calls <code>cluster_state.evict_worker(worker_id)</code> (<code>DELETE cluster:worker:{id}</code>); (b) even if no task is currently dispatching, the dead worker stops sending heartbeats and its Redis key expires after 10 seconds[cite: 2].</li>
+            <li><strong>Q: How does the system run locally on a laptop if Redis Server isn't installed?</strong><br>
+            <strong>A:</strong> <code>DualRedisClient</code> (<code>backend/app/core/redis_client.py</code>) pings <code>redis://localhost:6379/0</code> on startup[cite: 2]. If unreachable, it seamlessly falls back to <code>InMemoryTTLStore</code>, which implements the exact same async <code>setex</code>, <code>get</code>, <code>keys</code>, <code>ttl</code>, and <code>delete</code> interface using <code>time.monotonic()</code> expiration timestamps[cite: 2].</li>
+        </ol>
+    </div>
+
+    <!-- ==========================================
+         MEMBER 2 SECTION
+         ========================================== -->
+    <div class="member-section">
+        <h1>Member 2 (Sumedh) — Traffic Generation, Resource Profiles & OR-Tools MILP Optimization Guide</h1>
+        
+        <div class="role-header">
+            <p><strong>Role:</strong> Modules 2 & 3 — Stochastic Poisson Workload Modeling, Real NumPy Execution & Google OR-Tools MILP Task Scheduler[cite: 3]</p>
+            <p><strong>Technologies:</strong> Python 3.11, NumPy (<code>np.dot</code>), Google OR-Tools (<code>ortools.linear_solver.pywraplp</code> CBC/SCIP), Poisson Process, Matplotlib Benchmark Suite[cite: 3]</p>
+        </div>
+
+        <h2>1. Scope & Responsibilities in the Current Build</h2>
+        <p>Member 2 owns the <strong>Workload Modeling & Mathematical Decision Engine</strong> of CloudBalance[cite: 3]:</p>
+        <ol>
+            <li><strong>Authoritative Server-Side Resource Profile Table (<code>backend/app/core/profiles.py</code>)</strong>: Mapping each client <code>task_type</code> (<code>CPU_INTENSIVE</code>, <code>MEMORY_INTENSIVE</code>, <code>BALANCED_COMPUTE</code>, <code>LIGHTWEIGHT_QUERY</code>) to its exact CPU demand %, RAM demand MB, NumPy matrix dimension, and target duration[cite: 3].</li>
+            <li><strong>Stochastic Poisson Traffic Generator & CLI (<code>traffic/poisson_generator.py</code>, <code>traffic/workloads.py</code>, <code>traffic/cli.py</code>)</strong>: Generating realistic, seedable bursty request streams using inverse-transform sampling (<span class="math">dt = -ln(1-U)/&lambda;</span>) and demonstrating superposition of independent multi-laptop streams[cite: 3].</li>
+            <li><strong>Real NumPy Matrix Workload Executor (<code>worker/executor.py</code>)</strong>: Executing genuine <code>np.dot(A, B)</code> floating-point matrix multiplications on the internal Worker VMs (<code>:8001–8003</code>) instead of dummy <code>time.sleep()</code>[cite: 3].</li>
+            <li><strong>Google OR-Tools MILP Scheduler & In-Flight Reservation Tracker (<code>backend/app/schedulers/ortools_milp.py</code>, <code>base.py</code>)</strong>: Formulating micro-batch task placement as a Mixed-Integer Linear Program with min-max peak CPU objective, strict 85% CPU and 90% RAM safety caps, decaying in-flight reservations, and greedy lowest-projected-load fallback when oversubscribed[cite: 3].</li>
+            <li><strong>Baseline Schedulers & Reproducible Benchmark Suite (<code>round_robin.py</code>, <code>least_connections.py</code>, <code>benchmark/run_benchmark.py</code>)</strong>: Comparing OR-Tools MILP against Round Robin and Least Connections on the exact same seeded multi-client trace[cite: 3].</li>
+        </ol>
+
+        <h2>2. Exact Files Owned by Member 2</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>File Path</th>
+                    <th>Key Classes / Functions</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>backend/app/core/profiles.py</code></td>
+                    <td><code>TaskType</code>, <code>ResourceProfile</code>, <code>TASK_PROFILES</code>, <code>resolve_task_profile()</code></td>
+                    <td>Server-side lookup table translating <code>task_type</code> into CPU%, RAM MB, <code>matrix_dim</code>, and <code>duration_sec</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>worker/executor.py</code></td>
+                    <td><code>_run_numpy_dot_kernel()</code>, <code>create_worker_app()</code>, <code>POST /execute</code></td>
+                    <td>Internal Worker FastAPI service running real <code>np.dot</code> workloads and pushing live telemetry updates.</td>
+                </tr>
+                <tr>
+                    <td><code>traffic/poisson_generator.py</code></td>
+                    <td><code>PoissonTrafficGenerator</code>, <code>superpose_seeded_streams()</code></td>
+                    <td>Seedable exponential inter-arrival generator (<span class="math">dt = -ln(1-U)/&lambda;</span>) and multi-client stream superposition.</td>
+                </tr>
+                <tr>
+                    <td><code>traffic/workloads.py</code> & <code>traffic/cli.py</code></td>
+                    <td><code>WorkloadMix</code>, <code>ScenarioType</code>, <code>cb-traffic</code> CLI</td>
+                    <td>Supports <code>--mix cpu|mem|balanced</code> and <code>--scenario steady|burst|ramp</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/schedulers/base.py</code></td>
+                    <td><code>BaseScheduler</code>, <code>InFlightTracker</code>, <code>InFlightReservation</code></td>
+                    <td>Abstract scheduler interface and time-decaying in-flight resource reservation tracker.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/schedulers/ortools_milp.py</code></td>
+                    <td><code>ORToolsMILPScheduler</code></td>
+                    <td>CBC/SCIP Mixed-Integer Linear Programming scheduler with 50ms time limit and degraded fallback.</td>
+                </tr>
+                <tr>
+                    <td><code>backend/app/schedulers/round_robin.py</code> & <code>least_connections.py</code></td>
+                    <td><code>RoundRobinScheduler</code>, <code>LeastConnectionsScheduler</code></td>
+                    <td>Baseline schedulers implementing the exact same <code>BaseScheduler.assign()</code> contract for live hot-swap.</td>
+                </tr>
+                <tr>
+                    <td><code>benchmark/run_benchmark.py</code></td>
+                    <td><code>run_all_benchmarks()</code></td>
+                    <td>Replays identical seeded 3-laptop Poisson traffic across all 3 schedulers and outputs CSV, Markdown, and PNG charts.</td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="note">* Entire table[cite: 3]</p>
+
+        <h2>3. Mathematical Formulation & Code Walkthrough</h2>
+        <h3>A. Server-Side Resource Profile Table (<code>backend/app/core/profiles.py</code>)</h3>
+        <p>Clients never declare their own CPU or RAM needs (preventing spoofing or misconfiguration)[cite: 3]. Instead, the Controller resolves each <code>task_type</code>[cite: 3]:</p>
+        <table>
+            <thead>
+                <tr>
+                    <th><code>task_type</code></th>
+                    <th>CPU Demand</th>
+                    <th>RAM Demand</th>
+                    <th>Matrix Dim (<code>np.dot</code>)</th>
+                    <th>Target Duration</th>
+                    <th>Client Portal Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>CPU_INTENSIVE</code></td>
+                    <td><strong>35.0%</strong></td>
+                    <td><strong>256 MB</strong></td>
+                    <td>2400 × 2400</td>
+                    <td><code>4.0 s</code></td>
+                    <td>Neural AI Inference & 4K Render</td>
+                </tr>
+                <tr>
+                    <td><code>MEMORY_INTENSIVE</code></td>
+                    <td><strong>15.0%</strong></td>
+                    <td><strong>1024 MB</strong></td>
+                    <td>4500 × 4500</td>
+                    <td><code>5.0 s</code></td>
+                    <td>In-Memory Big Data Graph Load</td>
+                </tr>
+                <tr>
+                    <td><code>BALANCED_COMPUTE</code></td>
+                    <td><strong>25.0%</strong></td>
+                    <td><strong>512 MB</strong></td>
+                    <td>2000 × 2000</td>
+                    <td><code>3.0 s</code></td>
+                    <td>Analytics Report Compiler</td>
+                </tr>
+                <tr>
+                    <td><code>LIGHTWEIGHT_QUERY</code></td>
+                    <td><strong>10.0%</strong></td>
+                    <td><strong>128 MB</strong></td>
+                    <td>1000 × 1000</td>
+                    <td><code>1.5 s</code></td>
+                    <td>Cloud Search & Instant DB Lookup</td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="note">* Entire table[cite: 3]</p>
+
+        <h3>B. Poisson Arrival Process & Superposition (<code>traffic/poisson_generator.py</code>)</h3>
+        <ul>
+            <li><strong>Inter-Arrival Formula</strong>: Given arrival rate <span class="math">&lambda;</span> (tasks/sec) and <span class="math">U ~ Uniform(0, 1)</span>, the inter-arrival time is: <span class="math">dt = -ln(1 - U) / &lambda;</span>[cite: 3].</li>
+            <li><strong>Superposition Property</strong>: When <span class="math">K</span> client laptops independently generate Poisson streams with rates <span class="math">&lambda;<sub>1</sub>, &lambda;<sub>2</sub>, ... &lambda;<sub>K</sub></span>, the combined arrival stream at the Controller's single entry point is a Poisson process with total rate: <span class="math">&Lambda;<sub>total</sub> = &Sigma; &lambda;<sub>k</sub></span>[cite: 3].</li>
+        </ul>
+
+        <h3>C. Google OR-Tools MILP Formulation (<code>backend/app/schedulers/ortools_milp.py</code>)</h3>
+        <p>Given a micro-batch of <span class="math">N</span> tasks (<span class="math">i &isin; {0, ..., N-1}</span>) and <span class="math">M</span> active workers (<span class="math">j &isin; {0, ..., M-1}</span>)[cite: 3]:</p>
+        <ol>
+            <li><strong>Decision Variables</strong>[cite: 3]:
+                <ul>
+                    <li>Binary assignment variable <span class="math">X<sub>i,j</sub> &isin; {0, 1}</span>, where <span class="math">X<sub>i,j</sub> = 1</span> iff task <span class="math">i</span> is assigned to worker <span class="math">j</span>[cite: 3].</li>
+                    <li>Continuous peak CPU variable <span class="math">Z &isin; [0, 100]</span>[cite: 3].</li>
+                    <li>Continuous peak memory percentage variable <span class="math">M<sub>peak</sub> &isin; [0, 100]</span>[cite: 3].</li>
+                </ul>
+            </li>
+            <li><strong>Base Load (Telemetry + Decaying In-Flight Reservations)</strong>[cite: 3]:
+                <ul>
+                    <li><span class="math">BaseCPU<sub>j</sub> = TelemetryCPU<sub>j</sub> + InFlightCPU<sub>j</sub></span>[cite: 3]</li>
+                    <li><span class="math">BaseMem<sub>j</sub> = TelemetryMem<sub>j</sub> + InFlightMem<sub>j</sub></span>[cite: 3]</li>
+                </ul>
+            </li>
+            <li><strong>Hard Constraints</strong>[cite: 3]:
+                <ul>
+                    <li><strong>Single Assignment</strong>: <span class="math">&Sigma;<sub>j</sub> X<sub>i,j</sub> = 1</span> for all <span class="math">i</span>[cite: 3]</li>
+                    <li><strong>CPU Safety Cap (&le; 85%)</strong>: <span class="math">BaseCPU<sub>j</sub> + &Sigma;<sub>i</sub> cpu<sub>i</sub> * X<sub>i,j</sub> &le; 85.0</span> for all <span class="math">j</span>[cite: 3]</li>
+                    <li><strong>RAM Safety Cap (&le; 90% of Total RAM)</strong>: <span class="math">BaseMem<sub>j</sub> + &Sigma;<sub>i</sub> mem<sub>i</sub> * X<sub>i,j</sub> &le; 0.90 * TotalMem<sub>j</sub></span> for all <span class="math">j</span>[cite: 3]</li>
+                    <li><strong>Min-Max Peak Linearization</strong>: <span class="math">ProjectedCPU<sub>j</sub> &le; Z</span> and <span class="math">ProjectedMemPct<sub>j</sub> &le; M<sub>peak</sub></span> for all <span class="math">j</span>[cite: 3]</li>
+                </ul>
+            </li>
+            <li><strong>Objective Function</strong>: <span class="math">min (Z + 0.001 * M<sub>peak</sub>)</span>[cite: 3]. This minimizes the highest CPU load across all workers while using memory utilization percentage as a tie-breaker (steering 1024 MB <code>MEMORY_INTENSIVE</code> tasks toward the 8 GB <code>worker-3</code> when CPU loads are tied)[cite: 3].</li>
+            <li><strong>Degraded Fallback (<code>_degraded_fallback</code>)</strong>: If a massive burst makes the 85% CPU / 90% RAM caps mathematically <code>INFEASIBLE</code>, the scheduler does not drop tasks; it switches to greedy lowest-projected-load routing, sets <code>degraded=True</code>, and emits a live warning banner to the Dashboard[cite: 3].</li>
+        </ol>
+
+        <h2>4. Benchmark Proof (<code>benchmark/results/benchmark_report.md</code>)</h2>
+        <p>Replaying the exact same seeded 180-task multi-client burst stream across all 3 schedulers[cite: 3]:</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Scheduler</th>
+                    <th>Mean CPU StdDev (Lower = Better)</th>
+                    <th>Peak CPU (%)</th>
+                    <th>CPU Cap Violations (<code>&gt;85%</code>)</th>
+                    <th>RAM Cap Violations (<code>&gt;90%</code>)</th>
+                    <th>Mean Solver Latency</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong><code>ortools_milp</code></strong></td>
+                    <td><strong>5.50%</strong></td>
+                    <td><strong>95.36%</strong></td>
+                    <td><strong>3</strong></td>
+                    <td><strong>0</strong></td>
+                    <td><code>6.158 ms</code></td>
+                </tr>
+                <tr>
+                    <td><code>round_robin</code></td>
+                    <td>12.11%</td>
+                    <td>100.00%</td>
+                    <td>44</td>
+                    <td>13</td>
+                    <td><code>0.025 ms</code></td>
+                </tr>
+                <tr>
+                    <td><code>least_connections</code></td>
+                    <td>11.43%</td>
+                    <td>100.00%</td>
+                    <td>17</td>
+                    <td>3</td>
+                    <td><code>0.032 ms</code></td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="note">* Entire table[cite: 3]</p>
+
+        <h2>5. Top Viva Questions & Answers for Member 2</h2>
+        <ol>
+            <li><strong>Q: Why use Mixed-Integer Linear Programming (MILP) instead of Least Connections?</strong><br>
+            <strong>A:</strong> Least Connections only counts <em>how many</em> tasks a server has, treating a 10% CPU query and a 35% CPU / 1 GB RAM job as identical (<code>1 connection</code>)[cite: 3]. Moreover, when a batch of 10 tasks arrives, greedy heuristics assign one by one without global lookahead, whereas MILP solves the joint combinatorial placement across both CPU and RAM constraints in ~6 milliseconds[cite: 3].</li>
+            <li><strong>Q: Why do we need <code>InFlightTracker</code> (<code>backend/app/schedulers/base.py</code>)?</strong><br>
+            <strong>A:</strong> Worker <code>psutil</code> telemetry arrives every 1.5–2.0 seconds, whereas micro-batches run every 200ms[cite: 3]. Without in-flight reservations, 5 consecutive batches within 1 second would all read the same old telemetry and dump every task onto the same idle server[cite: 3]. <code>InFlightTracker</code> reserves the task's CPU and RAM immediately upon scheduling and releases it as soon as worker telemetry absorbs the active task or completes execution[cite: 3].</li>
+        </ol>
+    </div>
+
+    <!-- ==========================================
+         MEMBER 3 SECTION
+         ========================================== -->
+    <div class="member-section">
+        <h1>Member 3 (Nafisa) — FastAPI Backend, API Architecture, Micro-Batcher, Dispatcher, WebSockets & MongoDB Guide</h1>
+        
+        <div class="role-header">
+            <p><strong>Role:</strong> Module 3 — Central FastAPI Controller (<code>:8000</code> Single Public Entry Point), REST APIs, Micro-Batching, Internal Worker Dispatch & Failover, WebSocket Broadcaster, and MongoDB/SQLite Persistence[cite: 4]</p>
+            <p><strong>Technologies:</strong> Python 3.11, FastAPI, Uvicorn, Pydantic v2, <code>httpx</code>, <code>tenacity</code>, WebSockets, MongoDB (<code>motor</code> + <code>SQLiteFallbackStore</code>), <code>structlog</code>[cite: 4]</p>
+        </div>
+
+        <img src="./09_Backend_And_API_Call_Architecture.png" alt="CloudBalance Backend & API Call Architecture">
+
+        <h2>1. Scope & Responsibilities in the Current Build</h2>
+        <p>Member 3 owns the <strong>Central Nervous System & Communication Layer</strong> of CloudBalance[cite: 4]. Every component in the project—Member 1's <code>psutil</code> worker agents and Redis store, Member 2's OR-Tools MILP scheduler and traffic generator, and Member 4's React Dashboard and <code>/client</code> portal—connects through Member 3's FastAPI Controller on port <code>:8000</code>[cite: 4].</p>
+        <p>Your exact responsibilities in the codebase are[cite: 4]:</p>
+        <ol>
+            <li><strong>Single Public Entry Point & Application Lifecycle (<code>backend/app/main.py</code>, <code>backend/run_cluster.py</code>)</strong>: FastAPI app factory, async <code>lifespan</code> startup/shutdown of database clients, micro-batcher, and WebSocket broadcaster, CORS middleware, <code>X-Correlation-ID</code> tracing middleware, and serving the compiled React SPA (<code>/</code> and <code>/client</code>) directly from port <code>:8000</code>[cite: 4].</li>
+            <li><strong>Strict Data Contracts (<code>backend/app/models/schemas.py</code>)</strong>: Immutable Pydantic v2 models validating every inbound request and outbound response (<code>TaskRequest</code>, <code>Task</code>, <code>Telemetry</code>, <code>Assignment</code>, <code>ClusterSnapshot</code>, <code>ClientStats</code>, <code>BenchmarkRun</code>)[cite: 4].</li>
+            <li><strong>REST & WebSocket API Layer (<code>backend/app/api/*</code>)</strong>:
+                <ul>
+                    <li><code>tasks.py</code>: Task submission (<code>POST /api/v1/tasks</code>, <code>GET /api/v1/tasks/submit</code>), token-bucket rate limiting, HTTP 429 queue backpressure, recent tasks (<code>GET /api/v1/tasks/recent</code>), and profiles (<code>GET /api/v1/tasks/profiles</code>)[cite: 4].</li>
+                    <li><code>control.py</code>: Runtime scheduler hot-swap (<code>POST /api/v1/control/scheduler</code>), traffic spike injection & pause (<code>POST /api/v1/control/traffic</code>), worker kill/revive simulation (<code>POST /api/v1/control/workers/{id}/kill|revive</code>), and HTTP snapshot fallback (<code>GET /api/v1/control/snapshot</code>)[cite: 4].</li>
+                    <li><code>websocket.py</code> & <code>broadcaster.py</code>: Real-time <code>WS /ws</code> streaming <code>CLUSTER_SNAPSHOT</code> every 1.5 seconds to all connected browsers
